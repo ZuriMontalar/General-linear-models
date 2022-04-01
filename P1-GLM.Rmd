@@ -1,0 +1,242 @@
+---
+title: "Tarea 1 - GLM. Zuri Montalar Mendoza"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE,warning=FALSE, error=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<div style="text-align: justify">
+
+```{r biooij, include=FALSE}
+setwd("~/BIOESTADÍSTICA máster/IV. Modelización avanzada/Modelo lineales generalizados/Tareas MLG/tarea 1 GLM")
+```
+
+Disponemos de datos de los los 164 restaurantes franceses que se incluyen en la *Zagat Survey 2006: New York City Restaurants*, y se pretende modelar la probabilidad de que un restaurante francés esté incluido en la guía Michelín (*2006 Michelin Guide New York City*), en base a las opiniones de los clientes de *Zagat Survey 2006: New York City Restaurants*.
+
+Cargamos y preparamos los datos que vamos a utilizar, así como los paquetes.
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+datos<-read.csv("MichelinNY.csv")
+rownames(datos)<-datos[,2] # Nombramos cada fila con el valor que tenía la misma en
+                # la segunda columna, pues correspode al nombre de los restaurantes
+#datos<-datos[,-2] # Eliminamos la segunda columna
+datos<-data.frame(datos[,c(-1,-2)],datos[,1])
+names(datos)[length(datos)]="InMichelin" # renombramos la variable respuesta
+
+# Cargamos los paquetes que vamos a utilizar
+library(corrplot)
+library(ResourceSelection)
+library(pROC)
+library(boot)
+library(glmulti)
+```
+
+La variable respuesta es *InMichelin*, que es una variable cualitativa binaria simétrica, que tiene valor 1 si el restaurante está incluido en la guía Michelin, y valor 0 si no lo está.
+
+Las variables explicativas son: *Price*, el precio de la cena en $US, siendo por tanto una variable cuantitativa discretizada, tomando en todos los casos valores enteros; junto a las variables *Food*, *Decor* y *Service*, que corresponden a calificaciones de clientes sobre 30 de la comida, decoración y el servicio de cada restaurante, respectivamente. Estas tres variables son también cuantitativas discretas, pudiendo tomar valores positivos hasta 30. Pensamos que también estaría la posibilidad de trabajar con una agrupación de los posibles valores de las variables *Food*, *Decor* y *Service* (por ejemplo, que valores hasta 10 se asociaran a una calificación mala; entre 10 y 20, regular; y el resto, buena), y en ese caso consideraríamos las variables como categóricas. Sin embargo, como no disponemos de ningún criterio de clasificación, decidimos considerarlas cuantitativas discretas a variables categóricas ordinales y por tanto factores de 30 niveles.
+
+Pese a tener valores discretos las cuatro variables explicativas, como tienen un gran rango de valores utilizaremos para su representación gráfica diagramas de caja y bigotes (a la izquierda). Representamos también la gráficamente la matriz de correlación entre todas las variables (a la derecha).
+
+```{r fig.width=12,fig.height=5,fig.align="center",warning=FALSE, error=FALSE}
+par(mfrow=c(1,2))
+boxplot(datos[,-length(datos)],main="Diagrama de caja y bigotes")
+corrplot.mixed(cor(datos),lower="ellipse",upper="number",
+               tl.cex=0.9,tl.col=1)
+par(mfrow=c(1,1))
+table(datos$InMichelin)/length(datos$InMichelin)*100
+summary(datos[,-length(datos)])
+```
+
+Tenemos que de los 164 restaurantes franceses que se incluyen en la *Zagat Survey 2006: New York City Restaurants*, el 45.12% están en la guía Michelín y el 54.88% no lo está.
+
+Vemos que las calificaciones mínimas para Food, Decor y Price son 15, 12 y 13 respectivamente; y las máximas son 28 en los tres casos. La variable Price tiene más variabilidad que las otras tres como cabía esperar, además de presentar cierta asimetría positiva.
+
+En cuanto a la correlación entre las variables, vemos que en todos los casos es positiva, lo cual no nos sorprende, pues a mayores calificaciones en cualquiera de los ámbitos esperaríamos mayores calificaciones en los otros dos, así como un precio más elevado. Además, vemos que se da mayor correlación entre las variables Food y Service (de 0.8), seguida de la que se da entre Price y Service (de 0.73), y entre Decor y Price (de 0.71). 
+
+También podemos enfrentar las variables dos a dos utilizando la función `pairs()`.
+
+```{r fig.align="center",warning=FALSE, error=FALSE, fig.width=4,fig.height=4}
+pairs(datos)
+```
+
+
+Pese a que no nos sirve para abstraer ninguna conclusión esclarecedora, en la siguiente gráfica están representadas las medias de cada una de las variables explicativas según si los restaurantes se encuentran o no en la guía Michelín. Vemos que en todos los casos, tanto las calificaciones como el precio medio es mayor en el grupo de restaurantes que se encuentran en la guía Michelín. Sin embargo, la diferencia en las variables Food, Decor y Service no es muy abrumada.
+
+```{r fig.width=5,fig.height=2.5,fig.align="center",warning=FALSE, error=FALSE}
+No.GM<-c(apply(datos[datos$InMichelin==0,-length(datos)],2,mean))
+Si.GM<-c(apply(datos[datos$InMichelin==1,-length(datos)],2,mean))
+medias<-matrix(cbind(No.GM,Si.GM),ncol=4,byrow=TRUE)
+barplot(medias,beside=TRUE,main="Medias",col=4:5)
+noms<-colnames(datos)[-length(datos)]
+mtext(text=noms,side=1,at=seq(2,11,by=3),cex=0.85)
+legend("topleft",col=4:5,pch=15,bty="n",legend=c("No en GM","Sí en GM"),cex=0.7)
+```
+
+
+Como la variable respuesta es binaria, utilizaremos la distribución Bernoulli para modelizarla. Entonces, tenemos que la distribución de probabilidad sería: $P(InMichelin_i=1)=\pi_i$; $P(InMichelin_i=0)=1-\pi_i$. Además, la media y la varianza son las siguientes: $E(InMichelin_i)=\pi_i$; $Var(InMichelin_i)=\pi_i(1-\pi_i)$. El parámetro de interés es la probabilidad de que un restaurante francés esté en la guía Michelín.
+
+## Ajuste del modelo
+
+
+A continuación, ajustamos varios modelos lineales generalizados que incluyen todas las variables disponibles y estudiamos así qué link nos conviene utilizar para la variable respuesta.
+
+```{r warning=F,message=F,results="hide",error=FALSE,eval=FALSE}
+aj.logit<-glm(InMichelin~.,data=datos,family=binomial(link=logit))
+summary(aj.logit)
+res.aj.logit<-residuals(aj.logit,type ="deviance")
+shapiro.test(res.aj.logit); ks.test(res.aj.logit,"pnorm")
+hoslem.test(datos$InMichelin,fitted(aj.logit)) # Test de Hosmer y Lemeshow
+```
+
+```{r warning=F,message=F,results="hide",error=FALSE,eval=FALSE}
+aj.cll<-glm(InMichelin~.,data=datos,family=binomial(link=cloglog))
+summary(aj.cll)
+res.aj.cll<-residuals(aj.cll,type ="deviance")
+shapiro.test(res.aj.cll); ks.test(res.aj.cll,"pnorm")
+hoslem.test(datos$InMichelin,fitted(aj.cll)) # Test de Hosmer y Lemeshow
+```
+
+```{r warning=FALSE, error=FALSE}
+aj.probit<-glm(InMichelin~.,data=datos,family=binomial(link=probit))
+summary(aj.probit)
+res.aj.probit<-residuals(aj.probit,type ="deviance")
+shapiro.test(res.aj.probit)$p.value; ks.test(res.aj.probit,"pnorm")$p.value
+hoslem.test(datos$InMichelin,fitted(aj.probit))$p.value # Test de Hosmer y Lemeshow
+```
+
+Hemos realizado los ajustes con todas las variables disponibles, utilizando en la variable respuesta las transformaciones logit, log-log complemetaria y probit, y con ninguna de ellas se cumple la normalidad de los residuos (hemos realizado los tests Shapiro y Kolmogorov-Smirnov). Sin embargo, la transformación probit es la única con la cual, con un p-valor de 0.075 (mayor que 0.05, el nivel de significatividad que consideraremos a lo largo de todo el trabajo), no tenemos evidencia suficiente para rechazar la hipótesis nula del test de Hosmer y Lemeshow, y por tanto aceptamos que es un buen ajuste (o al menos mejor que con las otras dos transformaciones). Decidimos por tanto seguir estudiando el mejorar el ajuste, considerando en todos los casos el link probit.
+
+Utilizando entonces ese link, seguimos estudiando posibles modelos añadiendo interacciones y/o transformaciones de las covariables. Tras varias pruebas, tenemos que escogiendo todas las variables  con interacción entre Service y Price, se cumple la normalidad de los residuos, y además, con un p-valor de 0.155, tampoco hay evidencia suficiente para rechazar la hipótesis nula del test de Hosmer y Lemeshow, y por tanto aceptamos que es un buen ajuste:
+
+```{r warning=FALSE, error=FALSE}
+aj.probit.2<-glm(InMichelin~Food+Decor+Service*Price,data=datos,family=binomial(link=probit))
+summary(aj.probit.2)
+res.aj.probit.2<-residuals(aj.probit.2,type ="deviance")
+shapiro.test(res.aj.probit.2)$p.value; ks.test(res.aj.probit.2,"pnorm")$p.value
+hoslem.test(datos$InMichelin,fitted(aj.probit.2))$p.value # Test de Hosmer y Lemeshow
+```
+
+Estudiamos a continuación si podríamos reducir la cantidad de variables a utilizar para realizar el ajuste. Para la selección de variables, utilizaremos las función `step()` partiendo del ajuste que hemos obtenido previamente (aj.probit.2), así como la función `glmulti()` del paquete del mismo nombre, e indicaremos que busque el modelo con menor AIC de hasta una interacción entre las distintas variables:
+
+```{r warning=FALSE, error=FALSE}
+(aj.step<-step(aj.probit.2,trace=FALSE))
+```
+
+La función `step()` nos indica que obtenemos menor AIC si no consideramos la variable Decor, y que por tanto el mejor modelo sería el que tiene como fórmula InMichelin~Food+Service+Price+Service:Price.
+
+```{r warning=FALSE, error=FALSE}
+ajs.multi<-glmulti(InMichelin~Food+Decor+Service+Price,data=datos,family=
+                     binomial(link=probit),crit=aic,plotty=FALSE,report=FALSE)
+ajs.multi@formulas[[1]]
+aj.multi<-glm(InMichelin~1+Decor+Service+ Decor:Food+Service:Decor+Price:Food+ Price:Service,
+              data=datos,family=binomial(link=probit)) # creamos el modelo
+# aj.multi<-ajs.multi@objects[[1]] # Alternativa
+(summary(aj.multi))
+```
+
+En cambio, la función `glmulti()` nos indica que el mejor modelo es el que tiene como fórmula InMichelin~1+Decor+Service+Decor:Food+Service:Decor+Price:Food+Price:Service.
+
+Veamos pues cuál de todos estos modelos es el que mejor predice. Lo haremos mediante el área bajo la curva ROC (AUC), utilizando la función `roc()` del paquete *pROC*; y mediante validación cruzada, con la función `cv.glm()` del paquete *boot*.
+
+```{r warning=FALSE, error=FALSE,fig.width=3,fig.height=3,message=FALSE}
+# AUC curvas ROC
+roc(as.factor(datos$InMichelin),predict(aj.probit))$auc
+roc(as.factor(datos$InMichelin),predict(aj.probit.2))$auc
+roc(as.factor(datos$InMichelin),predict(aj.step))$auc
+roc(as.factor(datos$InMichelin),predict(aj.multi))$auc
+```
+
+La curva ROC enfrenta especificidad y sensibilidad, por lo que una predicción perfecta conllevaría a un AUC de 1, pudiendo considerar que si es superior a 0.8 (80%), tenemos buenas predicciones. En este caso, con todos los modelos tenemos AUC's mayores al 80%, siendo el modelo que mejor predice el ajustado con `glmnulti()` (el que hemos llamado aj.multi), con un AUC de 0.917, mayor que en el resto de modelos.
+
+```{r warning=FALSE, error=FALSE}
+# Validación cruzada
+set.seed (7)
+cv10<-matrix(nrow=100,ncol=4)
+for(i in 1:100){
+cv10[i,]<-c(cv.glm(datos, aj.probit,K=10)$delta[2],
+            cv.glm(datos, aj.probit.2,K=10)$delta[2],
+            cv.glm(datos,aj.step,K=10)$delta[2],
+            cv.glm(datos, aj.multi,K=10)$delta[2])}
+apply(cv10, 2, mean)
+```
+
+La primera componente de $\delta$ tras la validación cruzada son los estimadores $\hat{\sigma}^2$ (la varianza residual), pero esa estimación está sesgada, por lo que comparamos la segunda componente de $\delta$, que corrige dicho sesgo. Sin embargo, dichos valores son muy similares, y por la aleatoriedad intrínseca en este método, según la semilla que utilicemos obtenemos $\delta$'s de unos modelos mejores (menores) que de otros. Por ello, aleatorizamos el proceso de selección de grupos, realizando varias veces la validación cruzada, y mostrando la media de todas las iteraciones para cada ajuste (aunque también depende de la cantidad de grupos escogidos, que en este caso fijamos a 10).
+
+Hemos obtenido que según validación cruzada, el modelo que mejor predice es también el ajustado con `glmnulti()`, pues tiene una menor (media de) varianza residual (corregida).
+
+Tenemos aj.probit.2 y aj.step son modelos anidados, de modo que únicamente entre ellos podemos utilizar la diferencia de deviances para compararlos. Al hacerlo, obtenemos un p-valor de 0.62, por lo que no tenemos evidencia para rechazar la hipótesis nula y por tanto de entre esos dos nos quedaríamos con el modelo más simple (aj.step).
+
+```{r warning=FALSE, error=FALSE}
+# Diferencia de deviances entre aj.probit.2 y aj.step
+1-pchisq(aj.step$deviance-aj.probit.2$deviance,
+          aj.step$df.residual-aj.probit.2$df.residual)
+```
+
+
+Sin embargo, de los cuatro modelos con los que estamos trabajando, el que menor AIC presenta es aj.multi. Siendo este también el que menor varianza residual tenía y el de mayor AUC, podemos considerar que este es el mejor de entre los modelos estudiados, y por tanto nuestro modelo final.
+
+```{r}
+# Comprobamos normalidad de los residuos
+res.aj.multi<-residuals(aj.multi,type ="deviance")
+shapiro.test(res.aj.multi); ks.test(res.aj.multi,"pnorm")
+```
+
+Realizamos los tests Shapiro y Kolmogorov-Smirnov para evaluar la normalidad de los residuos deviance del modelo final, y tenemos p-valores de 0.6943 y 0.3973 respectivamente, que al ser mayores a 0.05, no tenemos evidencia suficiente para rechazar las hipótesis nulas y por tanto consideramos que sí se cumple la normalidad de los residuos. Esta normalidad también la podemos observar en el gráfico Q-Q.
+
+```{r warning=FALSE, error=FALSE}
+pchisq(aj.multi$deviance,df=aj.multi$df.residual,lower.tail=F)
+hoslem.test(datos$InMichelin,fitted(aj.multi)) # Test de Hosmer y Lemeshow
+```
+
+Para evaluar la calidad del ajuste, podemos utilizar la diferencia de deviances con un modelo nulo. Al hacerlo, tenemos un p-valor de 0.988, por lo que podríamos considerar que aj.multi es un buen ajuste. Sin embargo, la distribución en el muestreo de la deviance no es exactamente una $\chi^2$, sino que es una aproximación. Entonces, en este caso es preferible buscar alguna alternativa para evaluar la calidad del ajuste, como lo es el test de Hosmer y Lemeshow.En este, obtenemos un p-valor de 0.1278 y por tanto no tenemos evidencia estadística suficiente para considerar que no es un buen ajuste.
+
+```{r fig.width=4,fig.height=4,fig.align="center",warning=FALSE, error=FALSE}
+par(mfrow=c(2,2))
+plot(aj.multi) # Gráficas modelo final
+par(mfrow=c(1,1))
+```
+
+## Cálculo de probabilidades
+
+A partir de los coeficientes de aj.multi y siendo $\Phi()$ la función de distribución acumulada de una normal estándar, al aplicar la transformación probit en nuestro modelo final tenemos que:
+
+$\Phi^{-1}(\pi_j)=-23.26+0.9712\cdot Decor+0.9438\cdot Service-0.082\cdot Decor\cdot Food+0.0432\cdot Decor\cdot Service+0.0417\cdot Food\cdot Price-0.0413\cdot Service\cdot Price$.
+
+Por tanto, según el modelo que hemos obtenido, las variables que más influyen son la calificación en decoración y servicio del restaurante, con coeficientes de 0.9712 y 0.9438, respectivamente. También es cierto que es complejo determinar a simple vista la relación directa de cada una de las variables, debido a las diversas interacciones que se dan en el modelo.
+
+Podemos obtener $\Phi^{-1}(\pi_j)$ sustituyendo en las variables los valores deseados, y calcular $\pi_j$ utilizando en R la función `pnorm()`.
+
+Calculamos la probabilidad de que tres restaurantes con puntuaciones de 20/30 en calidad de la comida, decoración y servicio entren en la guía Michelín sabiendo que el precio de una cena es respectivamente de \$40, \$60 y \$80; y las mostramos en ese mismo orden a continuación:
+
+```{r}
+D<-20; F<-20; S<-20; P<-c(40,60,80)
+pnorm(-23.26+0.9712*D+0.9438*S-0.082*D*F+0.0432*D*S+0.0417*F*P-0.0413*S*P)
+```
+
+También estimamos la probabilidad de que tres restaurantes con puntuaciones de 20/30 en calidad de la comida y 20/30 en decoración cuya cena es de $60 entren en la guía Michelín sabiendo que de sus respectivas puntuaciones en servicio son 10, 20 y 30, y las visualizamos también en ese mismo orden a continuación:
+
+```{r}
+D<-20; F<-20; S<-c(10,20,30); P<-60
+pnorm(-23.26+0.9712*D+0.9438*S-0.082*D*F+0.0432*D*S+0.0417*F*P-0.0413*S*P)
+```
+
+Según estos resultados, el precio no parece influir demasiado en la probabilidad de que los restaurantes estén o no en la guía Michelín, aunque a mayor precio, mayor es esa probabilidad. Esto no concuerda del todo con lo que esperábamos desde un principio (pues manteniéndose el resto de variables constantes, esperaríamos que fuera menos probable incluir en la guía Michelín restaurantes más caros), aunque sí con los coeficientes del modelo, pues la variable Price está presente de forma de interacción en dos ocasiones, con coeficientes pequeños y similares, pero uno positivo y otro negativo. 
+
+Sin embargo, las probabilidades sí son muy distintas al considerar diferentes calificaciones en la variable Service, lo que también concuerda con los coeficientes del modelo (antes habíamos visto que sin interaccionar con otras variables, el coeficiente de Service era 0.9438, el segundo más elevado en este caso). Cabría esperar que fijando el resto de variables, al aumentar la calificación del servicio la probabilidad a calcular aumentase también, y vemos que justo ocurre lo contrario. Pensamos que eso es debido a la interacción entre Service y Price, de modo que si calculamos por ejemplo las probabilidades para los mismos valores de las variables, excepto para el precio, que lo consideramos de \$30, vemos que los resultados son opuestos a los anteriores.
+
+```{r}
+D<-20; F<-20; S<-c(10,20,30); P<-30
+pnorm(-23.26+0.9712*D+0.9438*S-0.082*D*F+0.0432*D*S+0.0417*F*P-0.0413*S*P)
+```
+
+
+
+
+
+
+
+

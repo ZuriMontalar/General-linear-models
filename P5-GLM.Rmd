@@ -1,0 +1,450 @@
+---
+title: "Tarea 5 de Modelos Lineales Generalizados"
+subtitle: "Covid-19 en Europa"
+author: "Zuri Montalar Mendoza"
+date: "14/06/2020"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+<!-- si quiero no mostrar algun resultado, poner results="hide"  pero con los plots no funcion, comentarlos si eso -->
+
+<!-- fig.dim=c(14,14), fig.cap="Figura 2: este es el titulo de la figura 2" -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo=FALSE,warning = FALSE,error=FALSE,message = FALSE)
+```
+
+Se pretende realizar un estudio observacional en el que se va a tratar de explicar el número de muertes por Covid-19 en países europeos en base a una serie de variables. Para ello, tenemos datos de número de casos y de fallecidos por cien mil habitantes en distintos países de Europa hasta el 7 de junio de 2020, obtenidos en *[ecdc](https://www.ecdc.europa.eu/en/cases-2019-ncov-eueea)*.
+
+Hemos decidido tener en cuenta la localización de cada país, de modo que tenemos variables de latitud y longitud que hemos obtenido *[en esta página web](https://www.geodatos.net/coordenadas)*. Además, de *[eurostat](https://ec.europa.eu/eurostat/data/database)* hemos decidido utilizar los siguientes datos:
+
+- Proporción de personas mayores de 65 años, en 2018: (*prop_edad65*)
+
+- Camas de hospital por cien mil habitantes, en 2017: (*camas_hosp*)
+
+- Densidad de población: número de personas por km^2^, en 2018: (*densidad_pob*)
+
+- Gasto total en salud en 2017, en euros por habitante: (*gasto_salud*)
+
+- Porcentaje de personas en riesgo de pobreza o exclusión social, en 2018: (*riesgo_pobreza*)
+
+Todas las variables explicativas que hemos comentado son cuantitativas continuas.
+
+Se han intentado utilizar los datos disponibles más recientes. En algunas variables sí disponíamos de datos de 2019, pero tenían demasiados valores faltantes, por lo que hemos decidido utilizar los datos del año anterior. Todas estas variables son para evaluar los fallecidos por Covid-19 en 2020, pero consideramos que no hay mucha variabilidad en los datos a dos o tres años vista.
+
+En nuestra base de datos, teníamos 4 datos faltantes, correspondientes al gasto total en salud de Polonia e Islandia; y al porcentaje de personas en riesgo de pobreza o exclusión social de Islandia y Liechtenstein. No sabemos a qué se debe el no disponer de estos datos, pero hemos supuesto que son del tipo MCAR (*Missing Completly At Random*), por lo que hemos imputado esos 4 valores y para ello, hemos recurrido a la imputación múltiple. Hemos decidido utilizar la función *hotdeck* del paquete *VIM*, que lleva a cabo la imputación de Hot-Deck.
+
+En el anexo mostramos cómo hemos creado la base de datos de la que vamos a partir, *COVID_bbdd.RData*, además de todo el código R que vamos a utilizar para este trabajo.
+
+
+```{r include=FALSE}
+setwd("~/BIOESTADÍSTICA máster/IV. Modelización avanzada/Modelo lineales generalizados/Tareas GLM/tarea 5 GLM")
+```
+
+
+```{r}
+# Cargamos nuestra base de datos
+load("COVID_bbdd.RData")
+```
+
+A continuación, realizamos una descriptiva de las variables:
+
+Tal como podemos ver en la siguiente figura, las variables *latitud* y *longitud* representan la localización de cada país, y las tendremos en cuenta en caso de querer introducir alguna componente espacial al modelo.
+
+```{r fig.dim=c(8,5)}
+plot(COVID_bbdd$longitud,COVID_bbdd$latitud,xlim=c(-25,40),type="n",
+     main="Coordenadas mapa Europa",xlab="longitud",ylab="latitud")
+text(COVID_bbdd$longitud,COVID_bbdd$latitud,labels=rownames(COVID_bbdd),cex=0.7)
+```
+
+
+```{r fig.dim=c(13,6)}
+library(car)
+par(mfrow=c(1,5))
+for (i in 5:9) {
+  Boxplot(COVID_bbdd[[i]],main=colnames(COVID_bbdd)[i],ylab=NULL)
+}
+par(mfrow=c(1,1))
+outliers<-c(11,24,18,30,7,6)
+t(matrix(rownames(COVID_bbdd)[outliers],dimnames=(list(outliers,"País: "))))
+```
+
+Como cabía esperar, vemos que todas las variables toman valores positivos. La proporción de personas mayores de 65 años y el porcentaje de personas en riesgo de pobreza o exclusión social parecen tener distribuciones simétricas, mientras que la cantidad de camas de hospital, el gasto total en salud y la densidad de población parecen presentar asimetría positiva. La variable más destacable es esta última, en la que vemos tres outliers superiores, correspondientes a Bélgica y Países Bajos, seguido de Malta, que con 1548.3 habitantes por km^2^ es el país con mayor densidad poblacional, con diferencia, de entre los estudiados. Observamos además tres outliers inferiores, de modo que Luxemburgo, Islandia e Irlanda tienen las menores proporciones de personas mayores de 65 años de entre los países que estamos considerando.
+
+
+```{r}
+library(ggplot2)                    
+library(GGally)
+ggpairs(COVID_bbdd,columns=c(2,5:9))
+```
+
+$$~~~$$
+
+En el gráfico anterior vemos que no hay correlaciones destacables entre las variables. Tanto es así, que las correlaciones con la variable respuesta son muy cercanas a 0, lo cual ya nos indica que si no tienen relación lineal entre ellas, tal vez quepa plantearnos otro tipo de relación. También podemos observar en la diagonal los diagramas de densidad de cada variable, además de las relaciones entre ellas.
+
+
+La variable respuesta (el número de muertes por Covid-19 en países europeos) son conteos, por lo que podríamos pensar que se distribuye con una Poisson. Alternativamente, como disponemos del número de casos de la enfermedad en cada país, también podríamos enfocarlo con una distribución Binomial, en cuyo caso tendríamos que la variable respuesta es el número de muertes sobre el total de casos detectados en cada país. Decidimos utilizar la distribución Poisson, de modo que el parámetro de interés es $\lambda$, la media de personas que fallecen por Covid-19 en los distintos países de Europa. Como es habitual en la regresión Poisson, utilizamos el logaritmo como función de enlace. Representamos a continuación el logaritmo de los fallecidos frente a cada variable explicativa:
+
+
+```{r}
+par(mfrow=c(2,3))
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$prop_edad65,
+     xlab="prop. mayores de 65",ylab="log(fallecidos)")
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$camas_hosp,
+     xlab="camas hospitales",ylab="log(fallecidos)")
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$densidad_pob,
+     xlab="densidad población",ylab="log(fallecidos)")
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$gasto_salud,
+     xlab="gasto salud",ylab="log(fallecidos)")
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$riesgo_pobreza,
+     xlab="riesgo pobreza",ylab="log(fallecidos)")
+par(mfrow=c(1,1))
+```
+
+Observamos que tal vez haya una relación positiva entre la proporción de personas mayores de 65 años y $logit(\pi)$, como también ocurre con la densidad de población (a excepción de Malta). El resto de variables explicativas no vemos una asociación marcada.
+
+Realizamos entonces regresión poisson múltiple. Tras realizar varias pruebas, vemos que cuantas más interacciones introducimos entre las variables, menor AIC obtenemos, y utilizando la función `step()`, teníamos que todas las interacciones eran significativas. Sin embargo, tampoco es de nuestro interés que se llegue a dar sobreajuste con los datos, de modo que en este caso hemos decidido introducir las covariables sin interacciones entre ellas. En el anexo podemos encontrar siete de los modelos probados: los tres primeros consisten en GLM's, incluyendo en algún caso términos cuadráticos; los otros cuatro modelos son GAM, pues incluyen algún término suavizado (para ello, hemos usado la función `gam()` del paquete *mgcv*). Hemos optado por plantearnos también esta opción, aún sabiendo que es preferible el modelado paramétrico, porque que visualmente no nos parecía clara la relación entre las covariables y la variable respuesta. En los *modelo6* y *modelo7* hemos añadido también las dos variables espaciales (*latitud* y *longitud*), en el *modelo6* con un suavizado bivariante de las mismas, y en el *modelo7* con ambas variables suavizadas.
+
+```{r}
+library(mgcv)
+```
+
+```{r}
+modelo1<-glm(Deaths~riesgo_pobreza+gasto_salud+densidad_pob+
+               camas_hosp+prop_edad65,family=poisson,data=COVID_bbdd)
+modelo2<-glm(Deaths~riesgo_pobreza+gasto_salud+densidad_pob+
+               camas_hosp+poly(prop_edad65,2),family=poisson,data=COVID_bbdd)
+modelo3<-glm(Deaths~riesgo_pobreza+gasto_salud+densidad_pob+poly(camas_hosp,2)+
+               poly(prop_edad65,2),family=poisson,data=COVID_bbdd)
+modelo4<-gam(Deaths~s(riesgo_pobreza,k=3)+s(gasto_salud,k=3)+
+               densidad_pob+s(camas_hosp,k=3)+
+               prop_edad65,family=poisson,data=COVID_bbdd)
+modelo5<-gam(Deaths~s(riesgo_pobreza,k=3)+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+s(camas_hosp,k=3)+
+               s(prop_edad65,k=3),family=poisson,data=COVID_bbdd)
+modelo6<-gam(Deaths~s(riesgo_pobreza,k=3)+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+s(camas_hosp,k=3)+s(prop_edad65,k=3)+
+               s(latitud,longitud,k=4),family=poisson,data=COVID_bbdd)
+modelo7<-gam(Deaths~s(riesgo_pobreza,k=3)+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+s(camas_hosp,k=3)+s(prop_edad65,k=3)+
+               s(longitud,k=3)+s(latitud,k=3),family=poisson,data=COVID_bbdd)
+```
+
+Cabe destacar que en todos los modelos probados, teníamos que todos los coeficientes eran significativos. Además, en todos los modelos GAM hemos obtenido los grados de libertad efectivos (edf) a todos los suavizados de alrededor de 2, lo cual podemos considerar como indicio de que sí es una buena opción, en este caso recurrir al modelado no paramétrico. Recordemos que valores de edf cercanos a 1 nos indicarían que el suavizado no sería necesario, y valores de edf cercanos a 0 nos empujarían a plantearnos que no es necesario incluir las variables en cuestión en nuestro modelo. A continuación, podemos ver los AIC's asociados a los siete modelos mencionados:
+
+```{r}
+mod.iniciales<-list(modelo1=modelo1,modelo2=modelo2,modelo3=modelo3,
+                    modelo4=modelo4,modelo5=modelo5,modelo6=modelo6,modelo7=modelo7)
+matriz.aic.ini<-matrix(ncol=length(mod.iniciales),
+                       dimnames=list("AIC",names(mod.iniciales)))
+for (i in 1:length(mod.iniciales)) {
+  matriz.aic.ini[1,i]<-mod.iniciales[[i]]$aic
+}
+matriz.aic.ini
+```
+
+Sabemos que los AIC's de los modelos GAM y GLM no son comparables, pero evaluando los residuos y el ajuste de los modelos *modelo3* (GLM con menor AIC) y *modelo7* (GAM con menor AIC), este último es el que presenta un mejor comportamiento. El *modelo7*, es un modelo GAM incluyendo el suavizado de todas las covariables, y tiene un R^2^~ajustado~ de 0.969. Al realizar el test Shapiro sobre los residuos de este modelo, el p-valor de 0.4096 no nos da evidencia suficiente para rechazar la hipótesis nula de que los residuos sean normales. Sin embargo, los valores de los residuos deviance son muy elevados, estando alrededor del 94% de ellos fuera del intervalo [-2,2] (siendo que en aceptaríamos tener no más del 5% de los residuos fuera de ese intervalo).
+
+Entonces, tenemos que el *modelo7* no cumple todas las validaciones necesarias. Llegados a este punto, pensamos que tal vez no hemos escogido unas variables explicativas adecuadas para modelizar el número de fallecidos por Covid-19. Aún así, decidimos seguir trabajando con estas covariables y este modelo por ver si lo podemos mejorar.
+
+```{r}
+# summary(modelo7)
+par(mfrow=c(2,4));plot(modelo7);par(mfrow=c(1,1))
+```
+
+Viendo el suavizado de las variables del *modelo7*, pensamos que algunas de las covariables podrían tener una relación lineal con la variable respuesta, como *riesgo_pobreza* o *camas_hosp*. Teniendo en cuenta que se trata de un estudio observacional, no tratamos de explicar los fallecidos por Covid-19 como tal con nuestras covariables ni extraer conclusiones al respecto. Sin embargo, sí podemos interpretar los resultados obtenidos: el *modelo7* nos sugiere que porcentajes más elevados de personas en riesgo de pobreza o exclusión social y de personas mayores de 65 años podrían estar relacionados con mayor número de fallecidos por Covid-19; o que hay más fallecidos al oeste de Europa que al este.
+
+
+
+Hemos probado un modelo (*modelo8*) incluyendo ambas de forma lineal y el resto de variables suavizadas, y hemos obtenido un R^2^~ajustado~ un poco mayor, de 0.971.
+
+```{r}
+modelo8<-gam(Deaths~riesgo_pobreza+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+camas_hosp+s(prop_edad65,k=3)+
+               s(longitud,k=3)+s(latitud,k=3),family=poisson,data=COVID_bbdd)
+summary(modelo8)
+```
+
+Al realizar el test Shapiro sobre los residuos de este nuevo modelo, tenemos un p-valor de 0.3726 que nos lleva a no rechazar la hipótesis nula de que los residuos sean normales. Además, de forma similar a como ocurría en el *modelo7*, los residuos deviance están alrededor del 94% de ellos fuera del intervalo [-2,2], por lo que este modelo tampoco cumple todas las validaciones necesarias.
+
+```{r eval=FALSE}
+plot(modelo8)
+shapiro.test(residuals(modelo8,type="deviance"))
+par(mfrow=c(2,2));gam.check(modelo8);par(mfrow=c(1,1))
+mean(abs(residuals(modelo8, type="deviance"))>2)
+```
+
+
+Veamos ahora si se produce sobredispersión. Para ello, podemos utilizar la función `dispersiontest()` del paquete *AER*, y obtenemos un p-valor de 0.01941, por lo que si consideramos un nivel de significatividad del 5% rechazaríamos la hipótesis nula y aceptaríamos que tenemos sobredispersión; pero si consideramos un nivel de significatividad del 1%, no tendríamos evidencia estadística suficiente para rechazar esa hipótesis nula.
+
+```{r eval=FALSE}
+library(AER)
+dispersiontest(modelo8)
+```
+
+Como posible forma de solucionar la sobredispersión, nos planteamos recurrir a un modelo mixto, añadiendo entonces un efecto aleatorio. Teniendo que el *modelo8* es un GAM, creamos un modelo GAMM añadiendo un efecto aleatorio del país sobre el intercepto: el *modelo8.al*. Para ello, utilizamos la función `gamm()` del paquete *mgcv*.
+
+```{r}
+COVID_bbdd$pais<- row.names(COVID_bbdd)
+```
+
+
+```{r}
+modelo8.al<-gamm(Deaths~riesgo_pobreza+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+camas_hosp+s(prop_edad65,k=3)+
+               s(longitud,k=3)+s(latitud,k=3),family=poisson,
+               random=list(pais=~1),data=COVID_bbdd)
+summary(modelo8.al[[2]])
+```
+
+```{r eval=FALSE}
+shapiro.test(residuals(modelo8.al[[1]],type="pearson"))
+mean(abs(residuals(modelo8.al[[1]],type="pearson"))>2)
+```
+
+Al introducir el efecto aleatorio, tenemos que algunos de términos no son significativos. También tenemos que todos los residuos se encuentran dentro del intervalo [-2,2], pero sin embargo al realizar el test Shapiro sobre los mismos obtenemos un p-valor de 3.161e-06, por lo que rechazamos la hipótesis de que siguen una distribución Normal. También cabe destacar que el R^2^~ajustado~ es ahora de 0.301, bastante menor que antes de incluir el efecto aleatorio. Por tanto, como este modelo tampoco nos pasa las validaciones. Con ello, a continuación representamos los valores ajustados frente a los valores reales con ambos modelos (con y sin el efecto aleatorio):
+
+
+```{r fig.dim=c(8,4)}
+par(mfrow=c(1,2))
+plot(COVID_bbdd$Deaths,modelo8$fitted.values,xlab="valores reales",
+     ylab="valores ajustados",main="Fallecidos- modelo8")
+abline(0,1,col=2)
+plot(COVID_bbdd$Deaths,modelo8.al[[2]]$fitted.values,xlab="valores reales",
+     ylab="valores ajustados",main="Fallecidos- modelo8.al")
+abline(0,1,col=2)
+par(mfrow=c(1,1))
+```
+
+Decidimos que es preferible el *modelo8*, pues vemos que ajusta mejor que el que añade el efecto aleatorio, lo cual ya quedaba reflejado con los R^2^~ajustados~ obtenidos.
+
+Podemos crear el mismo modelo pero bajo el punto de vista de la inferencia bayesiana en lugar de con la frecuentista, mediante la función `bayesx()` del paquete *R2BayesX*.
+
+```{r include=TRUE, message=FALSE, eval=FALSE}
+library(R2BayesX)
+mod8.bayes<-bayesx(Deaths~riesgo_pobreza+sx(gasto_salud)+
+               sx(densidad_pob)+camas_hosp+sx(prop_edad65)+
+               sx(longitud)+sx(latitud),family=poisson,
+               method="MCMC",data=COVID_bbdd)
+summary(mod8.bayes)
+```
+
+Con todo, no hemos conseguido un buen modelo para explicar los fallecimientos por Covid-19 en Europa y pensamos que podríamos obtener mejores resultados utilizado otras variables explicativas.
+
+
+# Anexo: código R
+
+## Creación base de datos
+
+```{r message=F,results="hide",error=FALSE,echo=TRUE,eval=FALSE}
+# DATOS
+library(readxl)
+# Datos Covid-19 hasta el 7 de junio
+Covid<-read_excel("datos_covid_7JUNIO.xlsx")
+
+# Proporción de personas mayores de 65 años, en 2018
+edad65<-read_excel("Proportion of population aged 65 and over.xlsx",
+                   sheet=3,range="A9:B55")
+colnames(edad65)<-c("Pais","prop_edad65")
+edad65$Pais[which(edad65$Pais==
+     "Germany (until 1990 former territory of the FRG)")]<-"Germany"
+edad65$Pais[which(edad65$Pais==
+    "Kosovo (under United Nations Security Council Resolution 1244/99)")]<-"Kosovo"
+# Camas de hospital por cien mil habitantes, en 2017
+camas<-read_excel("Hospital beds.xlsx",
+                   sheet=3,range="A10:B47")
+colnames(camas)<-c("Pais","camas_hosp")
+camas$Pais[which(camas$Pais==
+    "Germany (until 1990 former territory of the FRG)")]<-"Germany"
+camas$camas_hosp[which(camas$camas_hosp==":")]<-NA
+# Densidad de población. Nº de personas por km^2, en 2018
+densidad<-read_excel("Population density.xlsx",
+                   sheet=3,range="A9:B46")
+colnames(densidad)<-c("Pais","densidad_pob")
+densidad$Pais[which(densidad$Pais==
+    "Germany (until 1990 former territory of the FRG)")]<-"Germany"
+# Gasto total en salud en 2017. En € por habitante
+salud<-read_excel("Total health care expenditure.xlsx",
+                   sheet=3,range="A10:B48")
+colnames(salud)<-c("Pais","gasto_salud")
+salud$Pais[which(salud$Pais==
+    "Germany (until 1990 former territory of the FRG)")]<-"Germany"
+salud$gasto_salud[which(salud$gasto_salud==":")]<-NA
+# % de personas en riesgo de pobreza o exclusión social
+pobreza<-read_excel("People at risk of poverty or social exclusion.xlsx",
+                   sheet=3,range="A11:B46")
+colnames(pobreza)<-c("Pais","riesgo_pobreza")
+pobreza$Pais[which(pobreza$Pais==
+    "Germany (until 1990 former territory of the FRG)")]<-"Germany"
+pobreza$riesgo_pobreza[which(pobreza$riesgo_pobreza==":")]<-NA
+# Coordenadas
+coordenadas<-read_excel("coordenadas europa.xlsx")
+
+# Creamos nuestra base de datos con todas las variables incluidas
+datos_Covid<-Covid
+datos_Covid$`EU/EEA and the UK`[which(datos_Covid$`EU/EEA and the UK`==
+        "United_Kingdom")]<-"United Kingdom"
+# Añadimos la variable prop_edad65
+datos_Covid$prop_edad65<-rep(NA,dim(datos_Covid)[1])
+for (i in 1:dim(datos_Covid)[1]) {
+  for (j in 1:dim(edad65)[1]) {
+    if (datos_Covid$`EU/EEA and the UK`[i]==edad65$Pais[j])
+      datos_Covid$prop_edad65[i]<-edad65$prop_edad65[j]
+  }
+}
+# Añadimos la variable camas_hosp
+datos_Covid$camas_hosp<-rep(NA,dim(datos_Covid)[1])
+for (i in 1:dim(datos_Covid)[1]) {
+  for (j in 1:dim(camas)[1]) {
+    if (datos_Covid$`EU/EEA and the UK`[i]==camas$Pais[j])
+      datos_Covid$camas_hosp[i]<-camas$camas_hosp[j]
+  }
+}
+# Añadimos la variable densidad_pob
+datos_Covid$densidad_pob<-rep(NA,dim(datos_Covid)[1])
+for (i in 1:dim(datos_Covid)[1]) {
+  for (j in 1:dim(densidad)[1]) {
+    if (datos_Covid$`EU/EEA and the UK`[i]==densidad$Pais[j])
+      datos_Covid$densidad_pob[i]<-densidad$densidad_pob[j]
+  }
+}
+# Añadimos la variable gasto_salud
+datos_Covid$gasto_salud<-rep(NA,dim(datos_Covid)[1])
+for (i in 1:dim(datos_Covid)[1]) {
+  for (j in 1:dim(salud)[1]) {
+    if (datos_Covid$`EU/EEA and the UK`[i]==salud$Pais[j])
+      datos_Covid$gasto_salud[i]<-salud$gasto_salud[j]
+  }
+}
+# Añadimos la variable riesgo_pobreza
+datos_Covid$riesgo_pobreza<-rep(NA,dim(datos_Covid)[1])
+for (i in 1:dim(datos_Covid)[1]) {
+  for (j in 1:dim(pobreza)[1]) {
+    if (datos_Covid$`EU/EEA and the UK`[i]==pobreza$Pais[j])
+      datos_Covid$riesgo_pobreza[i]<-pobreza$riesgo_pobreza[j]
+  }
+}
+# Añadimos las coordenadas
+datos_Covid$latitud<-coordenadas$latitud
+datos_Covid$longitud<-coordenadas$longitud
+
+# Imputación múltiple de datos
+library(VIM)
+COVID_bbdd<-hotdeck(datos_Covid)[,1:dim(datos_Covid)[2]]
+
+rownames(COVID_bbdd)<-COVID_bbdd[,1] # Nombramos cada fila con el nombre del país
+COVID_bbdd<-COVID_bbdd[,-1] # Eliminamos la primera columna
+for (i in 1:dim(COVID_bbdd)[2]) {
+  COVID_bbdd[[i]]<-as.numeric(COVID_bbdd[[i]])
+}
+
+# Guardamos las bases de datos
+save(datos_Covid,file="datos_Covid.RData") # original
+save(COVID_bbdd,file="COVID_bbdd.RData") # con datos imputados
+```
+
+## Modelización
+
+```{r message=F,results="hide",error=FALSE,echo=TRUE,eval=FALSE}
+# Cargamos nuestra base de datos
+load("COVID_bbdd.RData")
+plot(COVID_bbdd$longitud,COVID_bbdd$latitud,xlim=c(-25,40),type="n",
+     main="Coordenadas mapa Europa",xlab="longitud",ylab="latitud")
+text(COVID_bbdd$longitud,COVID_bbdd$latitud,labels=rownames(COVID_bbdd),cex=0.7)
+library(car)
+par(mfrow=c(1,5))
+for (i in 5:9) {
+  Boxplot(COVID_bbdd[[i]],main=colnames(COVID_bbdd)[i],ylab=NULL)
+}
+par(mfrow=c(1,1))
+outliers<-c(11,24,18,30,7,6)
+t(matrix(rownames(COVID_bbdd)[outliers],dimnames=(list(outliers,"País: "))))
+library(ggplot2)                    
+library(GGally)
+ggpairs(COVID_bbdd,columns=c(2,5:9))
+par(mfrow=c(2,3))
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$prop_edad65,
+     xlab="prop. mayores de 65", ylab="log(fallecidos)")
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$camas_hosp,
+     xlab="camas hospitales", ylab="log(fallecidos)")
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$densidad_pob,
+     xlab="densidad población", ylab="log(fallecidos)")
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$gasto_salud,
+     xlab="gasto salud", ylab="log(fallecidos)")
+plot(log(COVID_bbdd$Deaths)~COVID_bbdd$riesgo_pobreza,
+     xlab="riesgo pobreza", ylab="log(fallecidos)")
+library(mgcv)
+modelo1<-glm(Deaths~riesgo_pobreza+gasto_salud+densidad_pob+
+               camas_hosp+prop_edad65,family=poisson,data=COVID_bbdd)
+modelo2<-glm(Deaths~riesgo_pobreza+gasto_salud+densidad_pob+
+               camas_hosp+poly(prop_edad65,2),family=poisson,data=COVID_bbdd)
+modelo3<-glm(Deaths~riesgo_pobreza+gasto_salud+densidad_pob+poly(camas_hosp,2)+
+               poly(prop_edad65,2),family=poisson,data=COVID_bbdd)
+modelo4<-gam(Deaths~s(riesgo_pobreza,k=3)+s(gasto_salud,k=3)+
+               densidad_pob+s(camas_hosp,k=3)+
+               prop_edad65,family=poisson,data=COVID_bbdd)
+modelo5<-gam(Deaths~s(riesgo_pobreza,k=3)+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+s(camas_hosp,k=3)+
+               s(prop_edad65,k=3),family=poisson,data=COVID_bbdd)
+modelo6<-gam(Deaths~s(riesgo_pobreza,k=3)+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+s(camas_hosp,k=3)+s(prop_edad65,k=3)+
+               s(latitud,longitud,k=4),family=poisson,data=COVID_bbdd)
+modelo7<-gam(Deaths~s(riesgo_pobreza,k=3)+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+s(camas_hosp,k=3)+s(prop_edad65,k=3)+
+               s(longitud,k=3)+s(latitud,k=3),family=poisson,data=COVID_bbdd)
+mod.iniciales<-list(modelo1=modelo1,modelo2=modelo2,modelo3=modelo3,
+                    modelo4=modelo4,modelo5=modelo5,modelo6=modelo6,modelo7=modelo7)
+matriz.aic.ini<-matrix(ncol=length(mod.iniciales),
+                       dimnames=list("AIC",names(mod.iniciales)))
+for (i in 1:length(mod.iniciales)) {
+  matriz.aic.ini[1,i]<-mod.iniciales[[i]]$aic
+}
+matriz.aic.ini
+summary(modelo7)
+par(mfrow=c(2,4));plot(modelo7)
+modelo8<-gam(Deaths~riesgo_pobreza+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+camas_hosp+s(prop_edad65,k=3)+
+               s(longitud,k=3)+s(latitud,k=3),family=poisson,data=COVID_bbdd)
+summary(modelo8)
+plot(modelo8)
+shapiro.test(residuals(modelo8,type="deviance"))
+par(mfrow=c(2,2));gam.check(modelo8);par(mfrow=c(1,1))
+mean(abs(residuals(modelo8, type="deviance"))>2)
+library(AER)
+dispersiontest(modelo8)
+COVID_bbdd$pais<- row.names(COVID_bbdd)
+modelo8.al<-gamm(Deaths~riesgo_pobreza+s(gasto_salud,k=3)+
+               s(densidad_pob,k=3)+camas_hosp+s(prop_edad65,k=3)+
+               s(longitud,k=3)+s(latitud,k=3),family=poisson,
+               random=list(pais=~1),data=COVID_bbdd)
+summary(modelo8.al[[2]])
+shapiro.test(residuals(modelo8.al[[1]],type="pearson"))
+mean(abs(residuals(modelo8.al[[1]],type="pearson"))>2)
+par(mfrow=c(1,2))
+plot(COVID_bbdd$Deaths,modelo8$fitted.values,xlab="valores reales",
+     ylab="valores ajustados",main="Fallecidos- modelo8")
+abline(0,1,col=2)
+plot(COVID_bbdd$Deaths,modelo8.al[[2]]$fitted.values,xlab="valores reales",
+     ylab="valores ajustados",main="Fallecidos- modelo8.al")
+abline(0,1,col=2)
+par(mfrow=c(1,1))
+library(R2BayesX)
+mod8.bayes<-bayesx(Deaths~riesgo_pobreza+sx(gasto_salud)+
+               sx(densidad_pob)+camas_hosp+sx(prop_edad65)+
+               sx(longitud)+sx(latitud),family=poisson,
+               method="MCMC",data=COVID_bbdd)
+summary(mod8.bayes)
+```
+
+
+
+
+
+
+
+
+
+
+

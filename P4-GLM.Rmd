@@ -1,0 +1,604 @@
+---
+title: "TAREA 4 de Modelos Lineales Generalizados"
+author: "Zuri Montalar Mendoza. 07/06/2020"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, error=FALSE, message=FALSE)
+```
+
+
+```{r include=FALSE}
+setwd("~/BIOESTADÍSTICA máster/IV. Modelización avanzada/Modelo lineales generalizados/Tareas GLM/tarea 4 GLM")
+```
+
+# Curvas ROC, sensibilidad y especificidad
+
+La sensibilidad es la tasa de verdaderos positivos, es decir, y corresponde a la potencia, esto es, la probabilidad de no cometer el error de tipo II. La especificidad es la tasa de verdaderos negativos y corresponde entonces a la eficiencia, que es la probabilidad de no cometer un error tipo I.
+
+Mediante las curvas ROC se pueden visualizar simultáneamente los dos tipos de errores que se pueden cometer al clasificar. En el gráfico, el eje de abscisas indica la especificidad, y el de ordenadas la sensibilidad. Entonces, tenemos que el funcionamiento general de un modelo viene dado por el área bajo la curca ROC (AUC), y nos proporciona información sobre la capacidad predictiva. Idealmente, esta curva debería estar muy cercana a 1 tanto en especificidad como en sensibilidad. Se suele considerar que, si el AUC es mayor que el 80%, el ajuste es bueno.
+
+# Dispersión y sobredispersión
+
+En las regresiones en las que se utiliza un único parámetro para modelizar una distribución de probabilidad, como es el caso de la logística o la Poisson, podemos tener problemas a la hora de modelizar bien la dispersión de los datos. Se trata de sobredispersión cuando la variación es mayor de lo esperado; e infradispersión cuando es menor de lo esperado.
+
+Para evaluar si hay o no equidispersión, en R podemos utilizar la función `dispersiontest()` del paquete *AER*, en cuyo contraste se considera como hipótesis nula que hay equidispersión. También se puede recurrir a la función `testDispersion()` del paquete *DHARMa*, que realiza un test basado en simulación para la infra o sobredispersión.
+
+Para solucionar este problema, podemos emplear modelos de quasi-verosimilitud, que incorporan otro parámetro para la variabilidad; cambiar de distribución de probabilidad (por ejemplo, a la binomial negativa o modelos poisson zero-inflados); o añadir efectos aleatorios que recojan esa variabilidad extra.
+
+
+# Análisis bayesiano tarea 1
+
+
+```{r}
+Miche<-read.csv("MichelinNY.csv")
+rownames(Miche)<-Miche[,2] # Nombramos cada fila con el valor que tenía la misma en
+                # la segunda columna, pues correspode al nombre de los restaurantes
+Miche<-Miche[,-2] # Eliminamos la segunda columna
+```
+
+En la tarea 1, el modelo final lo implementamos en R de la siguiente manera:
+*glm(InMichelin ~ 1+ Decor+ Service+ Decor:Food+ Service:Decor+ Price:Food+ Price:Service, data=Miche, family= binomial(link=probit))*.
+
+Vamos a crear el mismo modelo pero desde el punto de vista de la estadística bayesiana. Para ello, utilizamos la función `bayesglm()` del paquete *arm*, que nos permite visualizar los resultados como si se tratase de un análisis frecuentista.
+
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+library(arm)
+modelo.T1 <- bayesglm(InMichelin~1+Decor+Service+ Decor:Food+
+    Service:Decor+Price:Food+Price:Service, data=Miche,
+    family=binomial(link=probit), prior.scale=Inf, prior.df=Inf)
+display(modelo.T1)
+```
+
+Los resultados obtenidos son equiparables a los obtenidos en la tarea 1, como cabía esperar.
+
+Podemos visualizar por ejemplo las distribuciones a posteriori de los coeficientes, y vemos que todos ellos parecen relevantes, siendo muy pequeña la probabilidad de que sean 0.
+
+```{r results="markup",fig.align="center",warning=FALSE, error=FALSE,echo=FALSE,fig.width=7,fig.height=4}
+# gráficas a posteriori 
+par(mfrow=c(2,4))
+plot(density(coef(sim(modelo.T1))[,1]), main="", xlab="posterior beta0")
+plot(density(coef(sim(modelo.T1))[,2]), main="", xlab="posterior beta.D")
+plot(density(coef(sim(modelo.T1))[,3]), main="", xlab="posterior beta.S")
+plot(density(coef(sim(modelo.T1))[,4]), main="", xlab="posterior beta.DF")
+plot(density(coef(sim(modelo.T1))[,5]), main="", xlab="posterior beta.SD")
+plot(density(coef(sim(modelo.T1))[,6]), main="", xlab="posterior beta.PF")
+plot(density(coef(sim(modelo.T1))[,7]), main="", xlab="posterior beta.PS")
+```
+
+# Análisis bayesiano tarea 2
+
+
+```{r warning=FALSE, message=FALSE,error=FALSE}
+library(R2WinBUGS)
+QUEJAS<-read.csv("quejas.dat",sep="")
+```
+
+En la tarea 2, el modelo final lo implementamos en R de la siguiente manera:
+*glm(quejas~ 1+residente+ consultas+ residente:consultas, family=poisson (link="log"), QUEJAS)*. En esta ocasión, para darle el enfoque bayesiano vamos a recurrir a WinBUGS.
+
+```{r}
+modelo<-function() {
+  for (i in 1:n) {
+    # Verosimilitud
+    Quejas[i]~dpois(lambda[i])
+    log(lambda[i])<-beta0+beta.C*Consultas[i]+beta.R[Residente[i]]+
+      beta.RC[Residente[i]]*Consultas[i]
+  }
+  # Distribuciones iniciales
+  beta0~dnorm(0,0.01)
+  beta.C~dnorm(0,0.01)
+  beta.R[2]~dnorm(0,0.01)
+  beta.RC[2]~dnorm(0,0.01)
+  # Restricciones (tipo suma 0)
+  beta.R[1]<- -beta.R[2]
+  beta.RC[1]<- -beta.RC[2]
+}
+
+datos<-list(n=dim(QUEJAS)[1],Consultas=QUEJAS$consultas,Quejas=QUEJAS$quejas,
+            Residente=as.numeric(QUEJAS$residente))
+iniciales<-function() {
+  list(beta0=rnorm(1),beta.C=rnorm(1,0,0.01),beta.R=c(NA,rnorm(1,0,0.1)),
+       beta.RC=c(NA,rnorm(1,0,0.01)))
+}
+parametros<-c("beta0","beta.C","beta.R","beta.RC")
+Resultados<-bugs(model=modelo,data=datos,inits=iniciales,param=parametros,n.iter=10000,
+    n.burnin=2000,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+```
+
+
+```{r }
+signif(Resultados$summary,3)
+Resultados$DIC
+```
+
+Si tomamos como estimadores puntuales las medias o las medianas de las distribuciones a posteriori de cada coeficiente, estos resultados también son equiparables a los obtenidos en la tarea 2, aunque hay que tener en cuenta que aquí los coeficientes se interpretan de forma distinta, pues tienen intrínsecos los niveles de referencia fijados al crear el modelo (vemos entonces que las variables categóricas con dos niveles tienen sus coeficientes iguales pero de signo contrario), mientras que en frecuentista tenemos el término del nivel de referencia ya incluido en el intercepto.
+
+
+# Actividades semanales ejercicios tema 5
+
+
+El código R de este apartado se encuentra en el anexo.
+
+
+## Ejemplo 1. Catástrofe del Challenger
+
+
+**¿Cómo y cuándo podemos decir que la convergencia es buena? Dos paquetes enteramente dedicados a ello en R (*CODA, boa*).Investiga sobre ellos y su uso.**
+
+
+Además de las inspecciones visuales de las cadenas, en cuanto al paquete *CODA* para evaluar la convergencia, podemos recurrir a la función `geweke.diag ()`, que realiza el diagnóstico Geweke. Este trata de en una prueba de igualdad de las medias de la primera y última parte de una cadena de Markov, de modo que si las muestras se extraen de la distribución estacionaria de la cadena, las dos medias son iguales y la estadística de Geweke tiene una distribución normal estándar asintóticamente. Por tanto, siendo el output obtenido la puntuación Z, valores comprendidos en el intervalo [-1.96,1.96] nos empujarían a no rechazar la hipótesis nula de que las medias son iguales, y suponer entonces que las cadenas son estacionarias, que convergen.
+
+Otra opción es la función `gelman.diag()`, que implementa el diagnóstico de convergencia de Gelman-Rubin. Este diagnóstico se basa en una comparación de las variaciones dentro de la cadena y entre cadenas, de modo que si las cadenas han convergido, ambas estimaciones (la media de la varianza empírica dentro de cada cadena y la varianza empírica de todas las cadenas combinadas) son insesgadas. De lo contrario, el primer método subestimará la varianza, ya que las cadenas individuales no han tenido tiempo de extenderse por toda la distribución estacionaria, y el segundo método sobrestimará la varianza, ya que se eligieron los puntos de partida para que se dispersen en exceso. Por tanto, los valores de este diagnóstico considerablemente mayores que la unidad indican falta de convergencia.
+
+También podemos utilizar el diagnóstico de convergencia de Heidelberger-Welch mediante la función `heidel.diag()`, que usa el estadístico Cramervon-Mises para testear la hipótesis nula que indica que la cadena de Markov proviene de una distribución estacionaria. El test se aplica primero a toda la cadena, luego si la hipótesis nula es rechazada se descarta el primer 10 % de la cadena, y así sucesivamente si se van rechazando las hipótesis nulas, incrementando el porcentaje de cadena descartado hasta que se ha descartado un 50 % de la cadena. Entonces,  este último resultado supondría que no cumple el test de estacionariedad e indica por tanto que es necesario correr una cadena MCMC más larga.
+
+Con la función `raftery.diag()` podemos realizar el diagnóstico de convergencia de Raftery y Lewis que se basa en estimar la longitud mínima de la cadena necesaria para estimar un percentil con cierta precisión.
+
+Respecto al paquete *boa* para estudiar la convergencia, con las funciones `boa.geweke()`, `boa.chain.gandr()`, `boa.handw()` y  `boa.randl()` podemos aplicar, respectivamente, los cuatro diagnósticos de convergencia de Geweke, Gelman-Rubin, Heidelberger-Welch y Raftery-Lewis que ya hemos comentado.
+
+
+**Contesta:**
+
+**- ¿Cuáles son las conclusiones que puedes decir sobre el problema del Challenger? **
+
+El coeficiente asociado a la temperatura es relevante y negativo, por lo que podríamos pensar que a mayor temperatura, menor valor de logit(pi), y por tanto mayor valor de pi, siendo esta la probabilidad de que falle un anillo-O.
+
+**- Calcula un valor a partir del cual la probabilidad de que falle un anillo-O es inferior a 0.5.**
+
+Tenemos que $\mbox{logit}(\pi_i)=\beta_0+\beta_1\cdot\mbox{temp}_i$. Entonces, $\mbox{temp}_i=(\mbox{logit}(\pi_i)-\beta_0)/\beta_1$. Utilizaremos como estimadores puntuales de los coeficientes la mediana de sus distribuciones a posteriori.
+
+```{r include=FALSE, warning=FALSE}
+set.seed(1)
+temperatura <- c(66,70,69,68,67,72,73,70,57,63,70,78,
+                 67,53,67,75,70,81,76,79,75,76,58)
+averias <- c(0,1,0,0,0,0,0,0,1,1,1,0,0,2,0,0,0,0,0,0,2,0,1)
+library(mvtnorm)
+loglik <- function(beta){
+  sum(averias * (beta[1] + beta[2]*temperatura)) - 
+    sum(6 * log(1 + exp(beta[1] + beta[2] * temperatura))) 
+}
+mh <- function(nsim, s1, s2, b.init) {
+  mh.out <- matrix(ncol = 2, nrow = nsim)
+  b <- b.init
+  for (i in 1:nsim) {
+    b.p <- c(rnorm(1, b[1], s1), rnorm(1, b[2], s2))
+    if (runif(1) < exp(loglik(b.p) - loglik(b)))
+      b <- b.p
+    mh.out[i, ] <- b
+  }
+  mh.out
+}
+mh2 <- mh(nsim = 10000, s1 = 5, s2 = 0.05, b.init = c(0, 0))
+mhd <- function(nsim, V, b.init) {
+  mh.out <- matrix(ncol = 2, nrow = nsim)
+  b <- b.init
+  for (i in 1:nsim) {
+    b.p <- rmvnorm(n=1,mean=b,sigma=V)
+    if (runif(1) < exp(loglik(b.p) - loglik(b)))
+      b <- b.p
+    mh.out[i, ] <- b
+  }
+  mh.out}
+v <- 0.3*var(mh2)
+mh3 <- mhd(nsim=10000,V=v,b.init=c(0,0))
+beta0 <- mh3[5000:10000,1]
+beta1 <- mh3[5000:10000,2]
+```
+
+
+```{r}
+summary(beta0)
+summary(beta1)
+-median(beta0)/median(beta1) # ya que logit(0.5)=0
+```
+
+Obtenemos que a partir de una temperatura de aproximadamente 44ºF (dicho valor varía según las simulaciones), la probabilidad de que falle un anillo-O es inferior a 0.5.
+
+**- Calcula la distribución a posteriori de la probabilidad de fallar los anillos-O para la temperatura de 31ºF que hubo el día del accidente.**
+
+Podemos calcular la distribución a posteriori de la distribución a posteriori de la probabilidad de fallar los anillos-O para la temperatura de 31ºF como $\pi_i=\frac{exp(\beta_0+\beta_1\cdot\mbox{temp}_i)}{1+exp(\beta_0+\beta_1\cdot\mbox{temp}_i)}$
+
+```{r fig.width=7,fig.height=3,results="markup",eval=TRUE,echo=FALSE,warning=FALSE, error=FALSE}
+posteriori.prob<-(exp(beta0+beta1*31))/(1+exp(beta0+beta1*31))
+plot(density(posteriori.prob),xlab="prob. anillos-O fallen a 31 ºF",
+     main="Distribución a posteriori")
+summary(posteriori.prob)
+```
+
+Vemos que tenemos algunos valores inferiores a 0 y mayores que 1, lo cual estrictamente no puede darse refiriéndonos a probabilidades como es el caso. Aún así, tenemos que la densidad de la distribución a posteriori se acumula a la derecha, alrededor del valor 1, lo que implica que era bastante probable ese día, dada la temperatura de 31ºF que hubo, de que los anillos-O fallaran.
+
+**- Piensa e investiga cómo podrías obtener la distribución predictiva a posteriori del número de anillos-O que fallaron ese día. **
+
+Podríamos realizar muchas simulaciones de binomiales con 6 pruebas (ese día hubo 6 lanzamientos), con probabilidad de éxito la media de la distribución a posteriori de la probabilidad de que fallen los anillos:
+
+```{r fig.width=7,fig.height=3,results="markup",eval=TRUE,echo=FALSE,warning=FALSE, error=FALSE}
+plot(density(rbinom(10000,size=6,prob=mean(posteriori.prob))),
+     main="Distribución predictiva a posteriori")
+```
+
+
+## Ejemplo 2. Insecticidas
+
+**Aplica una nueva reparametrización para la log dosis: **
+
+```{r include=FALSE, warning=FALSE}
+Insect <- read.table("insectos.dat",header=T)
+Yres<-cbind(muertos<-Insect$y,vivos<-Insect$n-Insect$y)
+ldosis<-Insect$x
+library(arm)
+```
+
+```{r include=FALSE, warning=FALSE}
+ldosisc <- ldosis- mean(ldosis)
+```
+
+Ya vimos que no había sensibilidad frente al cambio de las previas, pues con previas diferentes obteníamos los mismos resultados, de modo que la forma de la distribución a posteriori cambia un poco, pero siempre se mueve en torno a los mismos valores. Vamos a compara entonces los resultados de la última de las pruebas en este ejemplo (*bm.5*) con lo mismo pero utilizando la reparametrización de la log dosis:
+
+
+```{r results="markup",fig.align="center",warning=FALSE, error=FALSE,echo=FALSE,fig.width=6,fig.height=3}
+par(mfrow=c(1,2))
+# con ldosis
+bm.5 <- bayesglm(Yres ~ ldosis,family=binomial(link="logit"),
+         prior.scale=2.5, prior.df=Inf)
+# normal prior con escala 2.5
+display (bm.5); bm.5$aic
+# grafica a posteriori beta1
+plot(density(coef(sim(bm.5))[,2]), main="con ldosis", xlab="posterior beta1" )
+# intervalo de credibilidad del 95% para el coef beta 1
+quantile(coef(sim(bm.5))[,2], c(0.025, 0.975))
+
+# con ldosisc
+bm.5.c <- bayesglm(Yres ~ ldosisc,family=binomial(link="logit"),
+         prior.scale=2.5, prior.df=Inf)
+# normal prior con escala 2.5
+display (bm.5.c); bm.5.c$aic
+# grafica a posteriori beta1
+plot(density(coef(sim(bm.5.c))[,2]), main="con ldosisc", xlab="posterior beta1" )
+# intervalo de credibilidad del 95% para el coef beta 1
+quantile(coef(sim(bm.5.c))[,2], c(0.025, 0.975))
+```
+
+Lo único que parece cambiar al reparametrizar es el valor del intercepto. Tenemos tanto un AIC como una deviance residual casi idénticos. También obtenemos distribuciones a posteriori parecidas, con intervalos de credibilidad al 95 % muy similares.
+
+**Considera la opción de términos cuadráticos a ver si mejoran el resultado.**
+
+```{r include=FALSE, warning=FALSE}
+#con ldosis^2
+bm.5.2 <- bayesglm(Yres ~ poly(ldosis,2),family=binomial(link="logit"),
+         prior.scale=2.5, prior.df=Inf)
+# normal prior con escala 2.5
+```
+
+```{r}
+summary (bm.5.2)$coefficients; bm.5.2$aic
+```
+
+Al considerar términos cuadráticos de la log-dosis, tenemos que todos los coeficientes son relevantes, y el AIC disminuye alrededor de 10 unidades en comparación con el modelo *bm.5*. La deviance residual también disminuye bastante.
+
+Hay que tener en cuenta que estamos realizando un análisis bayesiano aunque la función `bayesglm()` nos permita visualizar los resultados como habituamos en los análisis frecuentistas. Tal vez fuera interesante comparar los modelos en términos de DIC, por ejemplo, pero en este caso vamos a evaluar la diferencia de deviances con el test $\chi^2$.
+
+```{r}
+1-pchisq(bm.5$deviance-bm.5.2$deviance,bm.5$df.residual-bm.5.2$df.residual)
+```
+
+Obtenemos que el modelo con término cuadrático mejora con respecto al que no utiliza ese término cuadrático.
+
+**Realiza la predicción con WinBUGS:**
+
+Para realizar la predictiva del número de insectos que fallecen con las dosis de insecticidas, añadimos al modelo *pred.y[i] ~ dbin(p[i],n[i])*. Así, tendremos 8 distribuciones predictivas, según la dosis de insecticida aplicada.
+
+```{r warning=FALSE,include=FALSE}
+library(R2WinBUGS)
+modelo<-function() {
+  # Verosimilitud
+  for (i in 1:N) {
+    y[i] ~ dbin(p[i],n[i])
+    logit(p[i]) <- beta0 + beta1 * (x[i] - mean(x[]))
+    pred.y[i] ~ dbin(p[i],n[i]) # predictiva
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0.0, 0.001)
+  beta1 ~ dnorm(0.0, 0.001)
+}
+datos<-list(N=dim(Insect)[1],x=Insect$x,y=Insect$y,n=Insect$n)
+iniciales<-function() {
+  list(beta0=rnorm(1),beta1=rnorm(1))
+}
+parametros<-c("beta0", "beta1","pred.y")
+Resul<-bugs(model=modelo,data=datos,inits=iniciales,param=parametros,n.iter=8000,
+            n.burnin=200,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+```
+
+```{r results="markup",eval=TRUE,echo=FALSE,warning=FALSE, error=FALSE}
+round(Resul$summary,3)
+```
+
+Podemos representar los datos junto a su valor esperado e intervalo de predicción al 95% (considerando como estimador puntual la media de cada distribución):
+
+```{r  results="markup",eval=TRUE,echo=FALSE,warning=FALSE, error=FALSE,fig.width=5,fig.height=3,fig.align="center"}
+# Representación gráfica
+plot(Insect$y,Resul$mean$pred.y,pch=20,xlab="valores reales",
+ylab="valores esperados",main= "Nº de insectos que fallecen")
+abline(0,1,col=4,lwd=2)
+points(Insect$y,Resul$summary[3:10,3],pch=20,col=2)
+points(Insect$y,Resul$summary[3:10,7],pch=20,col=2)
+```
+
+Vemos que a excepción de en dos ocasiones (para mayores cantidades de insectos fallecidos dada la dosis), los intervalos de predicción al 95% (marcados por los puntos rojos) comprenden a lo que sería una predicción exacta de los valores observados (marcada por la línea azul). Tal como hemos hecho anteriormente, pensamos que podríamos obtener mejores resultados si añadimos el término cuadrático del logaritmo de la dosis.
+
+**Utiliza JAGS a través de R para ajustar los datos de este ejemplo.**
+
+```{r warning=FALSE,include=FALSE,message=FALSE}
+library(rjags)
+parameters <- c("beta0", "beta1")
+model.J <- jags.model(data=datos, file="model-insectos.txt", inits=iniciales,
+                      n.adapt=10000, n.chains=3)
+update(model.J, 10000) # burn-in
+model_result <- coda.samples(model.J, variable.names=parameters, n.iter=100000, thin=5)
+# plot(model_result)
+```
+
+```{r results="markup",eval=TRUE,echo=FALSE,warning=FALSE, error=FALSE}
+summary(model_result)
+```
+
+Tal como podemos observar, los resultados obtenidos son muy similares utilizando WinBUGGS y utilizando JAGS.
+
+
+**Utiliza WinBUGS a través de R para ajustar un modelo con link cloglog y con probit y comparar utilizando el DIC los ajustes obtenidos.**
+
+
+```{r warning=FALSE,include=FALSE,message=FALSE}
+# modelo con link cloglog
+modelo.cll<-function() {
+  # Verosimilitud
+  for (i in 1:N) {
+    y[i] ~ dbin(p[i],n[i])
+    cloglog(p[i]) <- beta0 + beta1 * (x[i] - mean(x[]))
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0.0, 0.001)
+  beta1 ~ dnorm(0.0, 0.001)
+}
+Resul.cll<-bugs(model=modelo.cll,data=datos,inits=iniciales,param=parameters,n.iter=8000,
+            n.burnin=2000,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.cll$summary,3)
+```
+
+
+```{r warning=FALSE,include=FALSE,message=FALSE}
+# modelo con link probit
+modelo.probit<-function() {
+  # Verosimilitud
+  for (i in 1:N) {
+    y[i] ~ dbin(p[i],n[i])
+    probit(p[i]) <- beta0 + beta1 * (x[i] - mean(x[]))
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0.0, 0.001)
+  beta1 ~ dnorm(0.0, 0.001)
+}
+Resul.probit<-bugs(model=modelo.probit,data=datos,inits=iniciales,param=parameters,n.iter=8000,
+            n.burnin=2000,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.probit$summary,3)
+```
+
+```{r results="markup",eval=TRUE,echo=FALSE,warning=FALSE, error=FALSE}
+matrix(c(Resul$DIC,Resul.cll$DIC,Resul.probit$DIC),ncol=3,dimnames=
+         list("DIC",c("logit","cloglog","probit")))
+```
+
+El menor DIC es el obtenido utilizando el link cloglog, y es alrededor de 7 unidades inferior a los otros dos DIC's. Por tanto, podríamos considerar que el mejor modelo de entre los tres propuestos es el que utiliza el link cloglog.
+
+## Ejemplo 3. CHD
+
+**Investiga el concepto de *cpo* como un método de validación cruzada que presenta INLA.**
+
+CPO (ordenadas predictivas condicionales) es un criterio de validación cruzada para la evaluación modelos, que se calcula para cada observación como $CPO_i=\pi(y_i|y_{-i})$.
+
+Entonces,para cada observación, la CPO es la probabilidad posterior de que se dé esa observación cuando el modelo se ajusta utilizando todos los datos excepto $y_i$. Con ello, valores grandes de CPO indican un mejor ajuste del modelo a los datos, mientras que los valores pequeños indican un mal ajuste del modelo a esa observación y tal vez se trate de un valor atípico.
+
+Utilizando la función `inla()` de la librería *INLA*, para obtener la CPO podemos indicar *cpo=TRUE* en el argumento *control.compute*.
+
+
+## Ejemplo 4. Factores de riesgo en bebés
+
+**Encontrar el mejor modelo utilizando WinBUGS.**`
+
+Todos los modelos los mostramos en el anexo. Comparamos los DIC's:
+
+```{r warning=FALSE,include=FALSE,message=FALSE}
+data(birthwt)
+
+m1.WB<-function() {
+  # Verosimilitud
+  for (i in 1:n) {
+    Peso.bajo[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0 + beta1 * Edad[i]
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0,0.01)
+  beta1 ~ dnorm(0,0.01)
+}
+datos<-list(n=dim(birthwt)[1],Peso.bajo=birthwt$low,Edad=birthwt$age)
+iniciales<-function() {list(beta0=rnorm(1,0,.1),beta1=rnorm(1,0,.1))}
+parametros<-c("beta0", "beta1")
+Resul.m1.WB<-bugs(model=m1.WB,data=datos,inits=iniciales,param=parametros,n.iter=2000,
+            n.burnin=300,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.m1.WB$summary,3)
+
+m2.WB<-function() {
+  # Verosimilitud
+  for (i in 1:n) {
+    Peso.bajo[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0 + beta1[Raza[i]]
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0,0.01)
+  beta1[3] ~ dnorm(0,0.01)
+  beta1[2] ~ dnorm(0,0.01)
+  # Restricciones (tipo suma 0)
+  beta1[1]<- -(beta1[2]+beta1[3])
+}
+datos<-list(n=dim(birthwt)[1],Peso.bajo=birthwt$low,Raza=birthwt$race)
+iniciales<-function() {list(beta0=rnorm(1),beta1=c(NA,rnorm(2)))}
+Resul.m2.WB<-bugs(model=m2.WB,data=datos,inits=iniciales,param=parametros,n.iter=2000,
+            n.burnin=300,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.m2.WB$summary,3)
+
+m3.WB<-function() {
+  # Verosimilitud
+  for (i in 1:n) {
+    Peso.bajo[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0 + beta1[Tabaco[i]]
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0,0.01)
+  beta1[2] ~ dnorm(0,0.01)
+  # Restricciones (tipo suma 0)
+  beta1[1]<- -(beta1[2])
+}
+datos<-list(n=dim(birthwt)[1],Peso.bajo=birthwt$low,
+            Tabaco=as.numeric(as.factor(birthwt$smoke)))
+iniciales<-function() {list(beta0=rnorm(1),beta1=c(NA,rnorm(1)))}
+Resul.m3.WB<-bugs(model=m3.WB,data=datos,inits=iniciales,param=parametros,n.iter=2000,
+            n.burnin=300,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.m3.WB$summary,3)
+
+m4.WB<-function() {
+  # Verosimilitud
+  for (i in 1:n) {
+    Peso.bajo[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0 + beta1*Edad[i]+ beta2[Raza[i]]
+  }
+  # Distribuciones iniciales
+  beta0~dnorm(0,0.01)
+  beta1~dnorm(0,0.01)
+  beta2[3]~dnorm(0,0.01)
+  beta2[2]~dnorm(0,0.01)
+  # Restricciones (tipo suma 0)
+  beta2[1]<- -(beta2[2]+beta2[3])
+}
+datos<-list(n=dim(birthwt)[1],Peso.bajo=birthwt$low,
+            Raza=birthwt$race,Edad=birthwt$age)
+iniciales<-function() {list(beta0=rnorm(1),beta1=rnorm(1),beta2=c(NA,rnorm(2)))}
+parametros2<-c("beta0", "beta1","beta2")
+Resul.m4.WB<-bugs(model=m4.WB,data=datos,inits=iniciales,param=parametros2,n.iter=2000,
+            n.burnin=300,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.m4.WB$summary,3)
+
+m5.WB<-function() {
+  # Verosimilitud
+  for (i in 1:n) {
+    Peso.bajo[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0 + beta1[Tabaco[i]] + beta2[Raza[i]]
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0,0.01)
+  beta1[2]~ dnorm(0,0.01)
+  beta2[3] ~ dnorm(0,0.01)
+  beta2[2] ~ dnorm(0,0.01)
+  # Restricciones (tipo suma 0)
+  beta2[1]<- -(beta2[2]+beta2[3])
+  beta1[1]<- -(beta1[2])
+}
+datos<-list(n=dim(birthwt)[1],Peso.bajo=birthwt$low,
+            Tabaco=as.numeric(as.factor(birthwt$smoke)),Raza=birthwt$race)
+iniciales<-function() {list(beta0=rnorm(1),beta1=c(NA,rnorm(1)),beta2=c(NA,rnorm(2)))}
+Resul.m5.WB<-bugs(model=m5.WB,data=datos,inits=iniciales,param=parametros2,n.iter=2000,
+            n.burnin=300,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.m5.WB$summary,3)
+
+m6.WB<-function() {
+  # Verosimilitud
+  for (i in 1:n) {
+    Peso.bajo[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0  + beta1*Edad[i]+ beta2[Tabaco[i]]
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0,0.01)
+  beta1~ dnorm(0,0.01)
+  beta2[2]~dnorm(0,0.01)
+  # Restricciones (tipo suma 0)
+  beta2[1]<- -(beta2[2])
+}
+datos<-list(n=dim(birthwt)[1],Peso.bajo=birthwt$low,
+            Tabaco=as.numeric(as.factor(birthwt$smoke)),Edad=birthwt$age)
+iniciales<-function() {list(beta0=rnorm(1),beta1=rnorm(1),beta2=c(NA,rnorm(1)))}
+Resul.m6.WB<-bugs(model=m6.WB,data=datos,inits=iniciales,param=parametros2,n.iter=2000,
+            n.burnin=300,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.m6.WB$summary,3)
+
+m7.WB<-function() {
+  # Verosimilitud
+  for (i in 1:n) {
+    Peso.bajo[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0  + beta1*Edad[i]+ beta2[Tabaco[i]]+ beta3[Raza[i]]
+  }
+  # Distribuciones iniciales
+  beta0 ~ dnorm(0,0.01)
+  beta1~ dnorm(0,0.01)
+  beta2[2]~dnorm(0,0.01)
+  beta3[3]~dnorm(0,0.01)
+  beta3[2]~dnorm(0,0.01)
+  # Restricciones (tipo suma 0)
+  beta2[1]<- -(beta2[2])
+  beta3[1]<- -(beta3[2]+beta3[3])
+}
+datos<-list(n=dim(birthwt)[1],Peso.bajo=birthwt$low,Raza=birthwt$race,
+            Tabaco=as.numeric(as.factor(birthwt$smoke)),Edad=birthwt$age)
+iniciales<-function() {list(beta0=rnorm(1),beta1=rnorm(1),
+                            beta2=c(NA,rnorm(1)),beta3=c(NA,rnorm(2)))}
+parametros3<-c("beta0", "beta1","beta2","beta3")
+Resul.m7.WB<-bugs(model=m7.WB,data=datos,inits=iniciales,param=parametros3,n.iter=2000,
+            n.burnin=300,bugs.directory="C:/Program Files (x86)/WinBUGS14",clearWD=TRUE)
+# round(Resul.m7.WB$summary,3)
+```
+
+```{r results="markup",eval=TRUE,echo=FALSE,warning=FALSE, error=FALSE}
+matrix(c(Resul.m1.WB$DIC,Resul.m2.WB$DIC,Resul.m3.WB$DIC,Resul.m4.WB$DIC,
+         Resul.m5.WB$DIC,Resul.m6.WB$DIC,Resul.m7.WB$DIC),ncol=7,dimnames=
+         list("DIC",c("m1.WB","m2.WB","m3.WB","m4.WB","m5.WB","m6.WB","m7.WB")))
+```
+
+
+Mediante INLA, el modelo final escogido era el quinto, es decir, el que explica el peso bajo en función de las variables *raza* y *tabaco*, pues presentaba menores valores de DIC así como de LCPO que el resto de modelos propuestos.
+
+Con WinBUGS, también tenemos que el menor DIC lo obtenemos con el quinto modelo, y pensamos entonces que es el mejor de entre los siete modelos estudiados.
+
+# Actividad semanal ejercicio tema 6
+
+## Ejemplo 3: Número de especies de galápagos
+
+**Realiza el estudio en bayesiano utilizando WinBUGS**
+
+Aunque estos modelos no nos daban error, no hemos conseguido que el programa termine de compilar y nos proporcione resultados. De todas formas, decidimos incluir el código de R implementado para los dos modelos (sin y con el efecto aleatorio) en el anexo. 
+
+En el ejemplo escala la variable *Scruz*, y recurre al logaritmo de las variables *Area* y *Adjacent*
+
+Con `inla()`, la fórmula para crear el modelo sin el efecto aleatorio es *Species~ log(Area)+ scale(Scruz)+ log(Adjacent)*. La variable respuesta (el número de especies) son conteos, por lo que utilizamos una distribución Poisson. Lo modelizamos con WinBUGS.
+
+Con `inla()`, para crear el modelo con efecto aleatorio se ha de añadir *f(Island,model="iid")*. Lo creamos también con WinBUGS.
+
+
+# Artículos
+
+A continuación, adjuntamos la tabla que recoge la información que se pide sobre los 20 artículos.
+
+
+
+
+
+
+
+
+
+
+
+
+

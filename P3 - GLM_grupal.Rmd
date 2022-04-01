@@ -1,0 +1,512 @@
+---
+title: "Ejemplos modelos log-lineales"
+subtitle: "Modelos Lineales Generalizados"
+author:
+- Zuri Montalar Mendoza
+- Albert Redondo Martínez
+- Caterina Olaya Paparsenos Fernández
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, error=FALSE,message=FALSE)
+```
+
+<div style="text-align: justify">
+
+# Introducción datos categóricos
+
+A lo largo de esta asignatura nos hemos encontrado en la situación de querer modelizar variables categóricas o discretas en función de otras variables explicativas (que podían ser categóricas o no). Para ello hemos utilizado modelos de regresión logística o de Poisson.
+
+En este documento presentaremos otra alternativa muy útil a la hora de modelizar datos categóricos: los modelos log-lineales.
+
+
+## Tablas de contingencia
+
+Habitualmente, cuando se quieren comparar dos o más variables categóricas se utilizan las tablas de contingencia. Su interés se centra en estudiar si existe alguna asociación entre una variable denominada fila y otra variable denominada columna y se calcula la intensidad de dicha asociación.
+
+En general, este tipo de tablas pueden abarcar varias filas (M) y columnas (N). El análisis puede ocasionalmente involucrar más variables; por ejemplo, puede considerarse una tercera variable, cada una de cuyas clases dé lugar a una tabla de MxN. 
+
+
+## Análisis de datos categóricos 
+
+La mayoría de las veces, cuando nos piden analizar variables categóricas, nos encontramos en la situación de tener que inferir sobre el comportamiento de las variables a partir de sus observaciones o sus proporciones. Para conseguirlo se suelen utilizar los siguientes test estadísticos:
+
+- Test de bondad de ajuste
+- Test de homogeneidad
+- Test de independencia
+
+### Bondad de ajuste
+
+Se suele aplicar en casos en los que se estudia a una única variable. Compara la distribución de frecuencias observadas $F_0$ de una variable cualitativa con la distribución de frecuencias esperadas $F_e$ de esa misma variable. Se puede utilizar la distribución Chi-cuadrado ($\chi^2$) para calcular la bondad de ajuste sobre una distribución predeterminada.
+
+El propósito de la prueba es averiguar si existen diferencias estadísticamente significativas entre la distribución de frecuencias observadas $F_0$ y la distribución de frecuencias esperadas $F_e$. Así, se plantean las siguientes hipótesis estadísticas:
+
+$H_0: F_0 = F_e \\ H_\alpha: F_0 \neq F_e$
+
+Si se acepta la hipótesis nula (p>0.05) significa que ambas distribuciones se ajustan bien.
+
+**Ejemplo**: segunda ley de Mendel/ley de la segregación independiente:
+
+Según las conclusiones de Mendel, durante la formación de los gametos la segregación de los alelos de un par es independiente de la segregación de los alelos de otro par. En sus experimentos cruzó plantas de guisantes y estudió la segregación de los alelos que dan el color al guisante (A=amarillo, a=verde) y su forma (B=liso, b=arrugado). Cruzó plantas de pura cepa (cruzamiento parental) y obtuvo los siguientes resultados:
+
+P-cruzamiento parental:  semilla amarilla, redonda x semilla verde, arrugada
+
+F1-primera generación parental: todos amarilla, lisa
+
+F2-segunda generación parental: 9 amarilla,lisa:3 amarilla,arrugada:3verde,lisa:1 verde,arrugada
+
+Un experimento produjo n = 556 semillas tal y como se muestran en la siguiente tabla:
+
+valores observados | valores esperados
+----------------- | -------------------
+315 |9 lisa,amarilla
+108 |3 arrugada, verde
+101 |3 lisa,verde
+32 | 1 arrugada,verde
+total 556 | 16
+
+¿Los resultados anteriores contradicen la hipótesis de Mendel?
+
+```{r}
+semillas<- c(315,108,101,32)
+
+chisq.test (semillas , p=c(9/16, 3/16, 3/16, 1/ 16))
+```
+
+En este caso, el p-valor supera el valor de significación (pvalor<0.05). Por tanto, se acepta la $H_0$ y se considera que los datos se ajustan a una distribución 9:3:3:1.
+
+
+### Contraste de homogeneidad
+
+Se utiliza cuando se tienen varias muestras independientes de "n" individuos que se clasifican respecto a una variable cualitativa y se desea conocer a partir de datos muestrales, si provienen de la misma población (el objetivo es comparar diferentes muestras). 
+
+De nuevo, se utiliza la distribución Chi-cuadrado ($\chi^2$) con la finalidad de conocer si la distribución de la variable estudiada difiere en las “r" poblaciones subyacentes de las cuales se obtuvieron las muestras.
+
+$H_0: P_1 = P_2=...=P_r$ (homogeneidad)
+
+$H_\alpha: P_1 \neq P_2\neq...\neq P_r$ (heterogeneidad)
+
+
+**Ejemplo**: Consumo de alcohol por sexos:
+
+En un estudio sobre drogodependencias se han obtenido sendas muestras de hombres y mujeres de niveles socio-económicos similares a los que se les ha preguntado por el consumo diario de alcohol (medidos en el equivalente a vasos de vino). El resultado de las respuestas se recoge en la siguiente tabla:
+
+```{r }
+y<- c(2,24,49,24,17,10,32,42,66,40,15,5)
+
+consumo<- gl(6,1,12, labels = c('0', '1', '2', '3', '4', '5 o más'))
+sexo<- gl(2,6,12, labels = c('Hombre', 'Mujer'))
+datos<- data.frame(y,consumo,sexo)
+(tabla<- xtabs(y~sexo+consumo))
+```
+
+El estudio pretende establecer si el consumo es homogéneo entre ambos sexos, es decir, si las proporciones de hombres y mujeres que consumen un determinado número de vasos diarios de vino son las mismas.
+
+```{r }
+chisq.test(tabla)
+```
+
+Si el nivel de significación es el habitual, $\alpha=0.05$, el p-valor<0.05, nos da evidencia suficiente para rechazar $H_0$ y admitir que el consumo es distinto en ambos sexos.
+
+
+### Contraste de Independencia
+
+Se utiliza el test Chi-cuadrado ($\chi^2$) cuando se tiene una muestra de n individuos que se clasifican respecto a dos variables y se desea conocer a partir de datos muestrales, si existe asociación de estas a nivel poblacional.
+
+$H_0$: Existe independencia
+
+$H_\alpha$: No existe independencia
+
+
+**Ejemplo**: Se quiere estudiar la dependencia entre la práctica de algún deporte y la depresión. Para ello se seleccionó una muestra aleatoria de 100 jóvenes con los siguientes datos:
+
+```{r }
+z<- c(38,9,31,22)
+
+depresion<- gl(2,1,4, labels = c('Sin', 'Con'))
+deporte<- gl(2,2,4, labels = c('Deportista', 'No deportista'))
+datos<- data.frame(z,depresion,deporte)
+(tabla1<- xtabs(z~deporte+depresion))
+```
+
+Se pretende determinar si existe independencia entre la actividad del sujeto y su estado de ánimo con un nivel de significación 5%.
+
+```{r }
+chisq.test(tabla1)
+```
+
+En este caso el pvalor<0.05 y por tanto se rechaza la $H_0$. Se puede decir con un nivel de significación del 5% que ambas variables no son independientes. Asumimos que existen relación entre la depresión y los hábitos deportistas del individuo.
+
+### Tablas de contingencia de 3 vías
+
+Habitualmente, se suelen estudiar las tablas de contingencia calculando estadísticos del tipo $\chi^2$ para contrastar independencia entre las variables. Cuando hay más variables involucradas, lo habitual es es repetir el análisis por parejas para las distintas sub-tablas y determinar las interacciones o asociaciones entre las variables.
+
+**Ejemplo**: Se quiere estudiar si existe relación entre la supervivencia de los pasajeros del barco Titanic de acuerdo con su clase social y su sexo.
+
+
+```{r}
+library(car)
+library(titanic)
+Titanic<-titanic_train
+clase.<-1:3
+sobrevive.<-0:1
+sexo.<-c("male","female")
+
+combinaciones3<-expand.grid(clase.,sobrevive.,sexo.)
+
+conteos3<-c()
+for (i in 1:dim(combinaciones3)[1]) {
+  conteos3[i]<-sum(Titanic$Pclass==combinaciones3[i,1] & Titanic$Survived==combinaciones3[i,2]
+                   & Titanic$Sex==combinaciones3[i,3])
+}
+clase<-gl(3,1,12,labels=clase.)
+sobrevive<-gl(2,3,12,labels=sobrevive.)
+sexo<-gl(2,6,12,labels=sexo.)
+datos3<-data.frame(conteos3,clase,sobrevive,sexo)
+```
+
+La manera más rápida de comprobar la independencia es analizando las tablas de dos vías que resultan al separar la variable sexo en dos tablas.
+
+```{r}
+#Sexo=Hombre
+(tabla.t1<-xtabs(conteos3[1:6]~clase[1:6]+sobrevive[1:6]))
+summary(tabla.t1)
+```
+
+```{r}
+#Sexo=Mujer
+(tabla.t2<-xtabs(conteos3[7:12]~clase[7:12]+sobrevive[7:12]))
+summary(tabla.t2)
+```
+
+Para ambas tablas, el p-valor es menor al nivel de significación 0.05 y por tanto se considera que las variables *clase* y *sobrevive* **no son independientes**. 
+
+En *R* se puede comprobar la independencia de las tres variables simultáneamente.
+
+```{r}
+tabla.t3<-xtabs(conteos3~clase+sobrevive-sexo)
+summary(tabla.t3)
+```
+
+Al igual que antes, las tres variables no son independientes entre sí.
+
+A pesar de que se pueden definir contrastes para valorar todos los tipos de independencia, queda claro que sería mejor buscar
+un método alternativo.
+
+Otra opción es utilizar los modelos log–lineales, que son un caso particular de los GLM para datos distribuidos como una distribución multinomial o como una Poisson, y que permiten ajustar el modelo sobre la estructura de las celdas de la tabla de contingencia.
+
+## Modelos log-lineales
+
+Este tipo de modelos se usan para analizar la relación entre dos, tres o más variables categóricas en una tabla de contingencia. Todas las variables que se analizan se consideran como variables respuesta, es decir, no se hace distinción entre variables independientes y
+dependientes. Es por ello que en estos modelos solo se estudia asociación entre las variables.
+
+
+# Ejemplo modelo log-lineal 2 vías
+
+## Ejemplo Titanic
+
+
+```{r include=FALSE}
+# library(titanic)
+Titanic<-titanic::titanic_train
+```
+
+Queremos estudiar si hay independencia entre las personas que sobrevivieron o no, y su clase.
+
+```{r}
+clase.<-1:3
+sobrevive.<-0:1
+
+combinaciones2<-expand.grid(clase.,sobrevive.)
+
+conteos2<-c()
+for (i in 1:dim(combinaciones2)[1]) {
+  conteos2[i]<-sum(Titanic$Pclass==combinaciones2[i,1] & Titanic$Survived==combinaciones2[i,2])
+}
+
+clase<-gl(3,1,6,labels=clase.)
+sobrevive<-gl(2,3,6,labels=sobrevive.)
+datos2<-data.frame(conteos2,clase,sobrevive)
+datos2
+```
+
+
+Ajustamos el modelo sin la interacción:
+
+```{r}
+mod.2vias.no.sat<-glm(conteos2~clase+sobrevive,data=datos2,family=poisson(link="log"))
+summary(mod.2vias.no.sat)
+```
+
+
+Creamos el modelo saturado, con la interacción entre las variables:
+
+```{r}
+mod2.2vias.sat<-glm(conteos2~clase*sobrevive,data=datos2,family=poisson(link="log"))
+summary(mod2.2vias.sat)
+```
+
+Comparamos ambos modelos:
+
+```{r}
+mod.2vias.no.sat$aic;mod2.2vias.sat$aic 
+mod.2vias.no.sat$deviance; mod2.2vias.sat$deviance
+1-pchisq(mod.2vias.no.sat$deviance-mod2.2vias.sat$deviance,mod.2vias.no.sat$df.residual-mod2.2vias.sat$df.residual)
+```
+
+En el modelo saturado, vemos que las interacciones son significativas. Además, el p-valor obtenido en la prueba $\chi^2$ para comparar ambos modelos es 0, por lo que rechazamos la hipótesis nula, y por tanto sí hay interacción entre las variables de *supervivencia* y *clase*, es decir, no son independientes.
+
+
+# Ejemplos modelos log-lineales 3 vías
+
+## Ejemplo 1. Titanic
+
+### Importación de los datos
+```{r}
+# library(car)
+# library(titanic)
+Titanic<-titanic_train
+clase.<-1:3
+sobrevive.<-0:1
+sexo.<-c("male","female")
+
+combinaciones3<-expand.grid(clase.,sobrevive.,sexo.)
+
+conteos3<-c()
+for (i in 1:dim(combinaciones3)[1]) {
+  conteos3[i]<-sum(Titanic$Pclass==combinaciones3[i,1] & Titanic$Survived==combinaciones3[i,2]
+                   & Titanic$Sex==combinaciones3[i,3])
+}
+clase<-gl(3,1,12,labels=clase.)
+sobrevive<-gl(2,3,12,labels=sobrevive.)
+sexo<-gl(2,6,12,labels=sexo.)
+datos3<-data.frame(conteos3,clase,sobrevive,sexo)
+```
+
+### Elección de modelo
+
+#### Modelo minimal
+
+En este caso, el modelo minimal es el modelo nulo.
+
+```{r}
+modnulo <- glm(conteos3~1, 
+               family=poisson(link=log), 
+               data = datos3)
+modnulo$deviance ; modnulo$aic
+```
+
+Realizamos en este caso un **procedimiento *backward*:**
+
+
+#### Modelo saturado
+```{r}
+modsaturado <- glm(conteos3~clase*sobrevive*sexo, 
+                   family=poisson(link=log), 
+                   data=datos3)
+modsaturado$deviance ; modsaturado$aic
+```
+
+
+#### Modelo dependencia completa o asociación homogénea
+```{r}
+moddepcompl <- glm(conteos3~(clase+sobrevive+sexo)^2, 
+                   family=poisson(link=log), 
+                   data=datos3)
+moddepcompl$deviance ; moddepcompl$aic
+1-pchisq(moddepcompl$deviance-modsaturado$deviance,moddepcompl$df.residual-modsaturado$df.residual)
+```
+
+Introducimos un modelo sin la interacción de segundo orden (dependencia completa), la cual relaciona las tres variables entre sí. También ajustamos el mismo modelo con la interacción (modelo saturado) y observamos el AIC, así como la diferencia de DEVIANCEs entre ellos. Podemos ver que la interacción de segundo orden es significativa en el modelo saturado, por lo que al no ser diferente de 0 debemos introducirla en el modelo. Además, el contraste entre ambos modelo es significativo (p-valor<0.05).
+
+### Análisis del modelo
+```{r}
+summary(modsaturado)
+```
+
+En el modelo con la interacción incluida no podemos eliminar ninguna interacción ni efecto, ya que la significatividad es positiva para todos los niveles de interacciones, por lo que no podremos mejorar el modelo.
+
+Tomando como referencia clase = 1, sobrevive = 0 y sexo = male, procedemos a analizar el ajuste del modelo teniendo en cuenta que en el intercept ya están contabilizadas estas referencias.
+
+En lo referido a la segunda clase y a la 3 clase, observamos que el valor del coeficiente es positivo para ambas clases, sin embargo, solo el coeficiente de la tercera clase es positivo. Como tenemos como valor referencia de la variable sobrevive = 0, al tener un coeficiente positivo asumiremos la tercera clase tendrá un valor mayor de conteos para sobrevive = no, algo con sentido para la época en la que estamos hablando.
+
+El siguiente coeficiente a observar sería el de sobrevive = 1, donde observamos un signo negativo además de una significatividad, por lo que lo relacionaremos con un menor número de conteos en los grupos que sobrevivieron. Esto se podía observar en la tabla previa, aunque de esta manera realizamos un test de significatividad donde la hipótesis nula es que el coeficiente es igual a 0.
+
+El coeficiente sin interacción con mayor valor absoluto es el del sexo=female. El ser mujer hace que el número de conteos de mujeres que no sobrevivieron baje drásticamente.
+
+Tras analizar los coeficientes sin interacción llegamos ya a las interacciones de segundo grado. 
+
+En primer lugar, observamos la interacción de clase con supervivencia, donde tomamos como valor la clase 1 y la no supervivencia. En este caso observamos que tanto para la clase 2 como la clase 3 hay una interacción con signo negativo y significativo que denota que el conteo de personas de clase 2 y clase 3 que sobrevivieron es mucho menor, algo que parece lógico dada la época donde el clasismo estaba muy presente en la sociedad.
+
+La siguiente interacción se produce entre clase y sexo, donde no observamos una interacción significativa entre la clase 2 y el sexo femenino, pero sí entre la clase 3 y el sexo femenino. Ambos coeficientes presentan un signo positivo, por lo que el conteo de mujeres de clase 3 que no sobrevivieron es mayor. 
+
+El factor de interacción entre supervivencia=1 y el sexo = female obtiene el mayor absoluto de todos, y una significatividad muy alta. Esto se relaciona con un aumento de los conteos de las mujeres que sobreviven.
+
+Tras las interacciones de segundo grado damos paso a las de tercer grado. En este caso la única que sale significativa es la interacción entre clase=3, sobrevive = 1 y sexo = female, donde observamos un signo negativo, por lo que observaremos menor número de conteos.
+
+Hemos podido observar que tenemos coeficientes significativos en todas las interacciones, por lo que no tendría sentido tratar de eliminar interacciones.
+
+## Ejemplo 2. Clínica
+Los datos de las siguiente tabla corresponden a la supervivencia de niños (Z) de acuerdo con la cantidad de cuidados prenatales recibidos por sus madres (Y), las cuales asistían a una de dos clínicas (X)
+
+### Introducción de los datos
+```{r}
+conteos <- c (3 ,176 ,4 ,293 ,17 ,197 ,2 ,23)
+clinica <- gl (2 ,4 ,8 , labels = c ( " A " ," B " ))
+cuidados <- gl (2 ,2 ,8 , labels = c ( " pocos " ," muchos " ))
+sobreviven <- gl (2 ,1 ,8 , labels = c ( " no " ," si " ))
+datos <- data.frame ( conteos , clinica , cuidados , sobreviven )
+```
+
+### Elección del modelo
+
+#### Modelo saturado
+
+```{r}
+modsaturado <- glm(conteos~clinica*cuidados*sobreviven, family=poisson, data=datos)
+modsaturado$deviance ; modsaturado$aic
+
+```
+
+#### Modelo de dependencia completa
+
+
+Introducimos el modelo de dependencia completa, el cual incluye todos los efectos principales y sus interacciones de primer orden, y lo comparamos con el modelo saturado.
+
+```{r}
+moddepcompl <- glm(conteos~(clinica+cuidados+sobreviven)^2, family=poisson, data=datos)
+moddepcompl$deviance ; moddepcompl$aic
+1-pchisq(moddepcompl$deviance-modsaturado$deviance,moddepcompl$df.residual-modsaturado$df.residual)
+```
+
+Hemos obtenido un p-valor de 0.835, y al ser mayor que 0.05 (nivel de significatividad que estamos considerando), consideramos que el modelo de dependencia completa ajusta de forma similar al saturado, y por tanto, entre ambos, escogeríamos el de dependencia completa, pues es más simple.
+
+A continuación queremos comprobar entonces si alguna de las  variables es independiente, independiente condicionalmente o dependiente completamente de cualquier otro de los efectos.
+
+#### Modelo sin interacciones
+
+```{r}
+modfit1 <- glm(conteos~clinica+cuidados+sobreviven, 
+               family=poisson,
+               data=datos)
+modfit1$deviance ; modfit1$aic
+```
+
+Con el modelo sin interacciones de primer orden observamos que tanto la DEVIANCE como el AIC son mucho mayores que los del modelo anterior, por lo que suponemos que algún tipo de dependencia tendremos.
+
+### Búsqueda del mejor modelo
+
+Una de las maneras para ir quitando términos del modelo es mediante el uso de comandos como `step()`, `add1()` y `drop1()`. En este caso hemos utilizado el **comando `step()`**. 
+
+```{r}
+step(moddepcompl)
+```
+
+Podemos observar cómo al final en la fórmula del modelo incluimos dos interacciones de primer orden, la clínica:cuidados y la clínica:sobreviven. 
+
+Entonces, tenemos que se da independencia condicional de *cuidados* y *sobreviven*, dado *clínica*.
+
+```{r}
+modelofinal<- glm(conteos~(cuidados+sobreviven)*clinica, 
+               family=poisson,
+               data=datos)
+summary(modelofinal)
+```
+
+
+## Ejemplo 3. Aspirina
+Un estudio de casos-controles donde se reunió a un grupo de pacientes con úlcera y se buscó otro grupo de individuos, de similares características, que no tuvieron úlceras. Los pacientes con úlceras fueron clasificados según la localización de la úlcera(gástrica o duodenal) y se les preguntó si consumían aspirina
+
+### Introducción de los datos
+```{r}
+conteos <- c (39 ,25 ,62 ,6 ,49 ,8 ,53 ,8)
+localizacion <- gl (2 ,4 ,8 , labels = c ( " gastrica " ," duodenal " ))
+ulcera <- gl (2 ,2 ,8 , labels = c ( " si " ," no " ))
+aspirina <- gl (2 ,1 ,8 , labels = c ( " no " ," si " ))
+datos <- data.frame ( conteos , localizacion , ulcera , aspirina )
+```
+
+
+### Búsqueda del mejor ajuste
+
+Utilizaremos en este caso un **procedimiento *forward*:**
+
+#### Modelo minimal
+```{r}
+modmin <- glm(conteos~ulcera*localizacion, 
+              family=poisson,
+              data=datos)
+modmin$deviance ; modmin$aic
+```
+
+
+
+Añadimos al modelo minimal, la variable *aspirina*:
+```{r}
+modfit0<- glm(conteos~aspirina+ulcera*localizacion, 
+              family=poisson, 
+              data=datos)
+modfit0$deviance ; modfit0$aic
+1-pchisq(modmin$deviance-modfit0$deviance,modmin$df.residual-modfit0$df.residual)
+```
+
+Con un p-valor de 0, consideramos que el modelo *modfit0* es mejor que el minimal. Añadimos a éste, de una en una, las interacciones de primer orden que faltan, y comparamos.
+
+
+```{r}
+modfit1<- glm(conteos~aspirina+ulcera+localizacion+aspirina:ulcera+ulcera:localizacion, 
+              family=poisson, 
+              data=datos)
+modfit1$deviance ; modfit1$aic
+```
+
+```{r}
+modfit2<- glm(conteos~aspirina+ulcera+localizacion+aspirina:localizacion+ulcera:localizacion, 
+              family=poisson, 
+              data=datos)
+modfit2$deviance ; modfit2$aic
+```
+
+En el modelo *modfit1* asumiríamos independencia condicionada de *aspirina* y *localización* a *úlcera*, mientras que en el *modfit2* es *úlcera* y *aspirina* las que están independientemente condicionadas a *localización.*
+ 
+Vemos que tenemos menor AIC y menor Deviance con *modfit1* que con *modfit2*. Comparemos si la diferencia de deviances entre *modfit1* y *modfit0* es suficientemente significativa:
+
+
+```{r}
+1-pchisq(modfit0$deviance-modfit1$deviance,modfit0$df.residual-modfit1$df.residual)
+```
+
+El p-valor es muy cercano a 0, por lo que el modelo *modfit1* tiene una deviance significativamente inferior a la del modelo *modfit0*, y por tanto consideraremos que ajusta mejor a nuestros datos.
+
+Comparemos ahora este modelo con el de dependencia completa:
+
+#### Modelo de dependencia completa
+```{r}
+moddepcompl <- glm(conteos~(aspirina+ulcera+localizacion)^2, 
+                   data=datos, 
+                   family=poisson)
+moddepcompl$deviance ; moddepcompl$aic
+1-pchisq(modfit1$deviance-moddepcompl$deviance,modfit1$df.residual-moddepcompl$df.residual)
+```
+
+Tras ajustar el modelo de dependencia completa lo comparamos con el modelo *modfit1* (al que le hemos eliminado una interacción de primer orden).
+
+Observamos que las DEVIANCEs ya empiezan a ser más similares, pues en este caso podríamos rechazar o no la hipótesis nula según el nivel de significatividad escogido (habitualmente del 1% o 5%). Si considerásemos una significatividad de 0.01, en este caso no rechazaríamos la hipótesis nula, por lo que el modelo de dependencia completa y el *modfit1* podrían ser igual de válidos. Sin embargo, con una significatividad de 0.05 sí rechazaríamos la hipótesis nula. Consideraremos esta segunda opción, de modo que aún nos queda por comprobar la interacción de segundo orden, donde será necesario la introducción del modelo saturado.
+
+#### Modelo saturado
+
+```{r}
+modsaturado <- glm(conteos~aspirina*ulcera*localizacion, family=poisson, data=datos)
+modsaturado$deviance ; modsaturado$aic
+```
+
+Observando el summary del modelo saturado se aprecia que la interacción de segundo orden es significativa, por lo que deberíamos realizar un contraste de hipótesis para valorar si la diferencia de DEVIANCEs entre el modelo de dependencia completa y el modelo saturado.
+
+```{r}
+1-pchisq(moddepcompl$deviance-modsaturado$deviance,moddepcompl$df.residual-modsaturado$df.residual)
+```
+
+Tras realizar ese contraste de hipótesis, con un p-valor de 0.12 rechazamos la hipótesis nula de igualdad de DEVIANCEs (considerando de nuevo significatividad del 5%) y asumimos que la DEVIANCE del modelo saturado es significativamente menor, y por tanto mejor, por lo que nos quedaremos con este último modelo, el saturado.
